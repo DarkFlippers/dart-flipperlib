@@ -14,10 +14,12 @@ abstract class _UsbPlatform {
       return true;
     }
 
+    final source = device.source;
     final haystack = [
       device.id,
       device.name,
       device.serialNumber ?? '',
+      if (source is DesktopUsbDiscoveredDevice) source.description,
     ].join(' ').toLowerCase();
     return haystack.contains('flipper') || haystack.contains('flip_');
   }
@@ -73,6 +75,11 @@ class _SerialPortWatcher {
 abstract class _SerialUsbPlatformBase extends _UsbPlatform {
   const _SerialUsbPlatformBase();
 
+  static final RegExp _flipperDescriptionPrefix = RegExp(
+    r'^Flipper[\s_-]+',
+    caseSensitive: false,
+  );
+
   @override
   Stream<void> get usbEvents => _SerialPortWatcher.instance.events;
 
@@ -94,9 +101,12 @@ abstract class _SerialUsbPlatformBase extends _UsbPlatform {
     required int? productId,
     required String? serialNumber,
   }) {
+    final shortName = description
+        .replaceFirst(_flipperDescriptionPrefix, '')
+        .trim();
     return FlipperDevice(
       id: portName,
-      name: description.isNotEmpty ? description : portName,
+      name: shortName.isNotEmpty ? shortName : portName,
       link: FlipperLink.usb,
       source: DesktopUsbDiscoveredDevice(
         portName,

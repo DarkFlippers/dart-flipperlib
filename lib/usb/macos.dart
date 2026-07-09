@@ -2,6 +2,7 @@ part of '../flipper_client.dart';
 
 class _MacosUsbPlatform extends _SerialUsbPlatformBase {
   const _MacosUsbPlatform();
+  static final RegExp _flipperPortName = RegExp(r'flip_(.+?)\d?$');
 
   @override
   Future<List<FlipperDevice>> loadDevices() async {
@@ -11,7 +12,7 @@ class _MacosUsbPlatform extends _SerialUsbPlatformBase {
       result.add(
         serialDevice(
           portName,
-          description: '',
+          description: _flipperPortName.firstMatch(portName)?.group(1) ?? '',
           vendorId: null,
           productId: null,
           serialNumber: null,
