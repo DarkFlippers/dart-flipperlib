@@ -2,43 +2,27 @@ part of '../flipper_client.dart';
 
 abstract class _UsbPlatform {
   const _UsbPlatform();
-
-  // Flipper Zero's USB CDC vendor id (STMicroelectronics Virtual COM Port).
   static const int flipperVid = 0x0483;
+  static const int flipperPid = 0x5740;
 
   Future<List<FlipperDevice>> loadDevices();
 
   Future<_Transport> openTransport(UsbDiscoveredDevice device);
-
-  // Fires whenever the USB topology changes (device attached / detached) so the
-  // UI can refresh on demand instead of polling on a timer. Platforms without a
-  // native hotplug API return an empty stream.
   Stream<void> get usbEvents => const Stream<void>.empty();
-
-  // Unified, platform-independent Flipper identification, evaluated against the
-  // already-populated FlipperDevice fields so every platform shares one rule.
   bool includeDevice(FlipperDevice device) {
-    if (device.vendorId == flipperVid) return true;
+    if (device.vendorId == flipperVid && device.productId == flipperPid) {
+      return true;
+    }
 
     final haystack = [
       device.id,
       device.name,
       device.serialNumber ?? '',
     ].join(' ').toLowerCase();
-    return haystack.contains('flipper') ||
-        haystack.contains('flip_') ||
-        haystack.contains('stm32') ||
-        haystack.contains('stmicroelectronics') ||
-        haystack.contains('virtual com') ||
-        haystack.contains('usbmodem') ||
-        haystack.contains('usbserial');
+    return haystack.contains('flipper') || haystack.contains('flip_');
   }
 }
 
-// Desktop serial backends (flutter_libserialport) expose no native hotplug
-// event, so this watcher diffs the cheap port-name list and only emits when the
-// set actually changes — letting the client refresh port metadata (which opens
-// each port) lazily instead of on a hard timer.
 class _SerialPortWatcher {
   _SerialPortWatcher._();
   static final _SerialPortWatcher instance = _SerialPortWatcher._();
