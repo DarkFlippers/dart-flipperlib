@@ -3,9 +3,12 @@
 // isolate. Mirrors qFlipper's FullRepairOperation
 // (.sources/qflipper/backend/flipperzero/toplevel/fullrepairoperation.cpp) for
 // the steps that are possible from the DFU bootloader: set recovery boot mode,
-// flash the wireless (radio) stack, flash the firmware, correct the option
-// bytes, then leave DFU. Post-boot asset/region provisioning is left to the
-// normal RPC update flow once the device re-enumerates.
+// install the wireless (radio) stack through the FUS cycle (start FUS →
+// FW_DELETE → download at the SFSA-derived address → FW_UPGRADE → version
+// check, with retries — qFlipper's WirelessStackDownloadOperation), flash the
+// firmware, correct the option bytes, then leave DFU. Post-boot asset/region
+// provisioning is left to the normal RPC update flow once the device
+// re-enumerates.
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
@@ -13,7 +16,9 @@ import 'dart:typed_data';
 
 import '../log_service.dart';
 import 'dfu_detector.dart';
+import 'dfuse_device.dart';
 import 'dfuse_file.dart';
+import 'stm32wb55/fus_state.dart';
 import 'stm32wb55/option_bytes.dart';
 import 'stm32wb55/stm32wb55.dart';
 
@@ -27,10 +32,12 @@ enum RecoveryStep {
 }
 
 /// Inputs for a full repair, extracted from a Flipper `update.tgz` bundle
-/// (`firmware.dfu`, `radio.bin`, and the `update.fuf` manifest's `Radio
-/// address` / option-byte fields). All file contents are passed by value so the
-/// isolate is self-contained. The radio is optional; complete option-byte data
-/// is required because recovery mode must be restored to normal boot at the end.
+/// (`firmware.dfu`, `radio.bin`, and the `update.fuf` manifest's option-byte
+/// fields). All file contents are passed by value so the isolate is
+/// self-contained. The radio is optional; complete option-byte data is required
+/// because recovery mode must be restored to normal boot at the end.
+/// [radioAddress] is an explicit override; when null or 0 the target address is
+/// computed from the device's SFSA option byte, like qFlipper's full repair.
 class RecoveryRequest {
   RecoveryRequest({
     required this.firmwareDfu,
@@ -214,31 +221,17 @@ void _runRecovery(RecoveryRequest req, void Function(Object) send) {
     }
   });
   send(const RecoveryLog('Waiting for DFU device to re-enumerate'));
-  _waitForDfuReenumeration();
+  _waitForDfuCycle();
   send(const RecoveryProgress(RecoveryStep.settingBootMode, 100));
 
-  // 2. Flash the wireless (radio) stack to the manifest's address, if provided.
-  //    Non-fatal — qFlipper proceeds to the firmware even if this fails (the
-  //    radio usually survives a firmware brick).
+  // 2. Install the wireless (radio) stack through the FUS cycle, mirroring
+  //    qFlipper's WirelessStackDownloadOperation. Non-fatal — qFlipper proceeds
+  //    to the firmware even if this fails (the radio usually survives a
+  //    firmware brick).
   final radioBin = req.radioBin;
-  final radioAddress = req.radioAddress;
-  if (radioBin != null && radioBin.isNotEmpty && radioAddress != null) {
+  if (radioBin != null && radioBin.isNotEmpty) {
     try {
-      _withDevice('flash radio', (dev) {
-        dev.onProgress = (op, pct) =>
-            send(RecoveryProgress(RecoveryStep.flashingRadio, pct));
-        send(
-          RecoveryLog(
-            'Radio target address 0x${radioAddress.toRadixString(16)}',
-          ),
-        );
-        if (!dev.erase(radioAddress, radioBin.length)) {
-          throw StateError('Failed to erase radio region');
-        }
-        if (!dev.download(radioBin, radioAddress, 0)) {
-          throw StateError('Failed to flash radio stack');
-        }
-      });
+      _flashWirelessStack(radioBin, req.radioAddress ?? 0, send);
     } catch (e) {
       send(RecoveryLog('Radio flash failed ($e); continuing with firmware'));
     }
@@ -263,8 +256,12 @@ void _runRecovery(RecoveryRequest req, void Function(Object) send) {
     throw StateError('Firmware .dfu has no image elements to flash');
   }
   _withDevice('flash firmware', (dev) {
-    dev.onProgress = (op, pct) =>
-        send(RecoveryProgress(RecoveryStep.flashingFirmware, pct));
+    dev.onProgress = (op, pct) => send(
+      RecoveryProgress(
+        RecoveryStep.flashingFirmware,
+        op == DfuseOperation.download ? 50 + pct / 2 : pct / 2,
+      ),
+    );
     if (!dev.downloadFile(fw)) throw StateError('Failed to flash firmware');
   });
   send(const RecoveryProgress(RecoveryStep.flashingFirmware, 100));
@@ -335,6 +332,240 @@ void _validateOptionBytesRequest(RecoveryRequest req) {
       throw StateError('OB write mask exceeds compare mask at byte $i');
     }
   }
+}
+
+// ── Wireless-stack (FUS) install, port of qFlipper's
+// WirelessStackDownloadOperation + Recovery FUS methods ──────────────────────
+
+enum _WirelessStatus { invalid, fusRunning, wsRunning, errorOccured, unhandledState }
+
+const int _installTryCount = 3;
+const int _checkTryCount = 3;
+const Duration _pollInterval = Duration(seconds: 1);
+// qFlipper's AbstractOperation timeout: an offline device fails the step only
+// after 30 s; while it is present the poll loop waits indefinitely.
+const Duration _offlineTimeout = Duration(seconds: 30);
+
+void _flashWirelessStack(
+  Uint8List radioBin,
+  int addressOverride,
+  void Function(Object) send,
+) {
+  var installTry = _installTryCount;
+  while (true) {
+    _startFus(send);
+    _deleteWirelessStack(send);
+    _downloadWirelessStack(radioBin, addressOverride, send);
+    _upgradeWirelessStack(send);
+
+    var ok = false;
+    for (var i = 0; i < _checkTryCount && !ok; i++) {
+      sleep(_pollInterval);
+      ok = _checkWirelessStack(send);
+      if (!ok) {
+        send(const RecoveryLog('Wireless stack check failed, retrying'));
+      }
+    }
+    if (ok) return;
+    if (--installTry <= 0) {
+      throw StateError(
+        'Could not install wireless stack after several tries, giving up',
+      );
+    }
+    send(const RecoveryLog('Wireless stack installation failed, retrying'));
+  }
+}
+
+// Recovery::startFUS. Both success paths reboot the device (leave, or the
+// second GET_STATE that actually boots FUS), so the caller must wait for
+// re-enumeration.
+void _startFus(void Function(Object) send) {
+  send(const RecoveryLog('Starting firmware upgrade service (FUS)'));
+  _withDevice('start FUS', (dev) {
+    final state = dev.fusGetState();
+    if (!state.isValid) {
+      throw StateError('Failed to get FUS state');
+    } else if (state.status == FusStatus.idle &&
+        state.error == FusError.noError) {
+      send(const RecoveryLog('FUS is already running, rebooting for consistency'));
+      if (!dev.leave()) throw StateError('Failed to leave DFU mode');
+    } else if (state.status == FusStatus.errorOccured &&
+        state.error == FusError.notRunning) {
+      send(RecoveryLog('FUS appears not to be running: $state'));
+      dev.fusGetState();
+    } else {
+      throw StateError('Unexpected FUS state: $state');
+    }
+  });
+  send(const RecoveryLog('Waiting for the device to reboot into FUS'));
+  _waitForDfuCycle();
+}
+
+void _deleteWirelessStack(void Function(Object) send) {
+  send(const RecoveryLog('Deleting old co-processor firmware'));
+  _withDevice('delete wireless stack', (dev) {
+    if (!dev.fusFwDelete()) {
+      throw StateError('Failed to send FW_DELETE command');
+    }
+  });
+  _waitForWireless(
+    send,
+    failOn: const {_WirelessStatus.wsRunning, _WirelessStatus.errorOccured},
+    what: 'removal of the wireless stack',
+  );
+}
+
+// Recovery::downloadWirelessStack: with no override the image goes right below
+// the current secure-flash boundary, `(origin + 0x1000·SFSA − size) & ~0xFFF`.
+void _downloadWirelessStack(
+  Uint8List radioBin,
+  int addressOverride,
+  void Function(Object) send,
+) {
+  send(const RecoveryProgress(RecoveryStep.flashingRadio, 0));
+  _withDevice('flash radio', (dev) {
+    var addr = addressOverride;
+    if (addr == 0) {
+      final ob = dev.optionBytes();
+      if (!ob.isValid) {
+        throw StateError('Failed to read option bytes for radio address');
+      }
+      final origin = dev.partitionOrigin(WbPartition.flash);
+      const pageSize = 0x1000;
+      final sfsa = ob.value('SFSA');
+      addr = (origin + pageSize * sfsa - radioBin.length) & ~(pageSize - 1);
+      send(
+        RecoveryLog(
+          'SFSA value is 0x${sfsa.toRadixString(16)}, '
+          'radio target address 0x${addr.toRadixString(16)}',
+        ),
+      );
+    } else {
+      send(
+        RecoveryLog(
+          'Radio target address overridden to 0x${addr.toRadixString(16)}',
+        ),
+      );
+    }
+    dev.onProgress = (op, pct) => send(
+      RecoveryProgress(
+        RecoveryStep.flashingRadio,
+        op == DfuseOperation.download ? 50 + pct / 2 : pct / 2,
+      ),
+    );
+    if (!dev.erase(addr, radioBin.length)) {
+      throw StateError('Failed to erase radio region');
+    }
+    if (!dev.download(radioBin, addr, 0)) {
+      throw StateError('Failed to flash radio stack');
+    }
+  });
+}
+
+void _upgradeWirelessStack(void Function(Object) send) {
+  send(const RecoveryLog('Sending FW_UPGRADE command'));
+  _withDevice('upgrade wireless stack', (dev) {
+    if (!dev.fusFwUpgrade()) {
+      throw StateError('Failed to send FW_UPGRADE command');
+    }
+  });
+  // WSRunning is fine here: the freshly installed stack may auto-start.
+  _waitForWireless(
+    send,
+    failOn: const {_WirelessStatus.errorOccured},
+    what: 'installation of the wireless stack',
+  );
+}
+
+bool _checkWirelessStack(void Function(Object) send) {
+  final address = DfuUsb.instance.acquireDevice();
+  if (address == null) return false;
+  final dev = Stm32Wb55(address);
+  try {
+    if (!dev.beginTransaction()) return false;
+    final info = dev.versionInfo();
+    if (!dev.endTransaction()) return false;
+    send(
+      RecoveryLog(
+        'FUS version: ${info.fusVersion}; '
+        'wireless stack version: ${info.wirelessVersion}',
+      ),
+    );
+    return info.wirelessVersion != '0.0.0';
+  } finally {
+    DfuUsb.instance.releaseDevice(address);
+  }
+}
+
+// Recovery::wirelessStatus: any failure to reach the device or read a valid
+// state is Invalid, which the poll loops treat as "wait for the next tick".
+_WirelessStatus _wirelessStatus() {
+  final address = DfuUsb.instance.acquireDevice();
+  if (address == null) return _WirelessStatus.invalid;
+  final dev = Stm32Wb55(address);
+  try {
+    if (!dev.beginTransaction()) return _WirelessStatus.invalid;
+    final state = dev.fusGetState();
+    if (!state.isValid) {
+      dev.endTransaction();
+      return _WirelessStatus.invalid;
+    }
+    if (!dev.endTransaction()) return _WirelessStatus.invalid;
+    LogService.log('[Recovery] current FUS state: $state');
+    if (state.status == FusStatus.idle && state.error == FusError.noError) {
+      return _WirelessStatus.fusRunning;
+    } else if (state.status == FusStatus.errorOccured) {
+      return state.error == FusError.notRunning
+          ? _WirelessStatus.wsRunning
+          : _WirelessStatus.errorOccured;
+    } else {
+      return _WirelessStatus.unhandledState;
+    }
+  } finally {
+    DfuUsb.instance.releaseDevice(address);
+  }
+}
+
+// Port of the 1 s polling loops in WirelessStackDownloadOperation. Undecided
+// statuses keep waiting; the device disappearing for more than the operation
+// timeout fails the step. Returns on any decisive status not in [failOn].
+void _waitForWireless(
+  void Function(Object) send, {
+  required Set<_WirelessStatus> failOn,
+  required String what,
+}) {
+  DateTime? absentSince;
+  while (true) {
+    sleep(_pollInterval);
+    final status = _wirelessStatus();
+    if (status == _WirelessStatus.invalid ||
+        status == _WirelessStatus.unhandledState) {
+      if (DfuUsb.instance.isPresent()) {
+        absentSince = null;
+      } else {
+        absentSince ??= DateTime.now();
+        if (DateTime.now().difference(absentSince) > _offlineTimeout) {
+          throw StateError('Failed to finish $what: operation timeout');
+        }
+      }
+      continue;
+    }
+    if (failOn.contains(status)) {
+      throw StateError('Failed to finish $what');
+    }
+    return;
+  }
+}
+
+// Waits out a reboot: first for the device to drop off the bus (bounded, in
+// case the cycle was missed), then for it to come back openable.
+void _waitForDfuCycle() {
+  final sw = Stopwatch()..start();
+  while (sw.elapsed < const Duration(seconds: 10)) {
+    if (!DfuUsb.instance.isPresent()) break;
+    sleep(const Duration(milliseconds: 100));
+  }
+  _waitForDfuReenumeration(timeout: const Duration(seconds: 30));
 }
 
 // Acquires a DFU device, runs [body] inside an open transaction, and always
