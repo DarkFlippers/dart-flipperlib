@@ -23,7 +23,7 @@ class LogService {
     });
 
     pretty_logging.Logger.defaultOutput = _LogServiceOutput.new;
-    await UniversalBle.setLogLevel(BleLogLevel.verbose);
+    await UniversalBle.setLogLevel(BleLogLevel.info);
   }
 
   static void log(String msg) {
