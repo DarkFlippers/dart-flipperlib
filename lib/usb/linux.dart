@@ -5,29 +5,7 @@ class _LinuxUsbPlatform extends _SerialUsbPlatformBase {
 
   @override
   Future<List<FlipperDevice>> loadDevices() async {
-    final result = <FlipperDevice>[];
-    final availablePorts = _readSerialProperty(() => SerialPort.availablePorts);
-    for (final portName in availablePorts ?? const <String>[]) {
-      final port = SerialPort(portName);
-      try {
-        final description = metadataDescription(port);
-        final vendorId = metadataVendorId(port);
-        final productId = metadataProductId(port);
-        final serialNumber = metadataSerialNumber(port);
-        result.add(
-          serialDevice(
-            portName,
-            description: description,
-            vendorId: vendorId,
-            productId: productId,
-            serialNumber: serialNumber,
-          ),
-        );
-      } finally {
-        port.dispose();
-      }
-    }
-    return result;
+    return comportsDevices(linuxComports);
   }
 
   @override

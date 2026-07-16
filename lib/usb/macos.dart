@@ -2,24 +2,10 @@ part of '../flipper_client.dart';
 
 class _MacosUsbPlatform extends _SerialUsbPlatformBase {
   const _MacosUsbPlatform();
-  static final RegExp _flipperPortName = RegExp(r'flip_(.+?)\d?$');
 
   @override
   Future<List<FlipperDevice>> loadDevices() async {
-    final result = <FlipperDevice>[];
-    final availablePorts = _readSerialProperty(() => SerialPort.availablePorts);
-    for (final portName in availablePorts ?? const <String>[]) {
-      result.add(
-        serialDevice(
-          portName,
-          description: _flipperPortName.firstMatch(portName)?.group(1) ?? '',
-          vendorId: null,
-          productId: null,
-          serialNumber: null,
-        ),
-      );
-    }
-    return result;
+    return comportsDevices(macosComports);
   }
 
   @override

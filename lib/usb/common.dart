@@ -81,59 +81,53 @@ abstract class _SerialUsbPlatformBase extends _UsbPlatform {
   );
 
   @override
-  Stream<void> get usbEvents => _SerialPortWatcher.instance.events;
-
-  String metadataDescription(SerialPort port) =>
-      _readSerialString(() => port.description) ?? '';
-
-  int? metadataVendorId(SerialPort port) => _readSerialInt(() => port.vendorId);
-
-  int? metadataProductId(SerialPort port) =>
-      _readSerialInt(() => port.productId);
-
-  String? metadataSerialNumber(SerialPort port) =>
-      _readSerialString(() => port.serialNumber);
-
-  FlipperDevice serialDevice(
-    String portName, {
-    required String description,
-    required int? vendorId,
-    required int? productId,
-    required String? serialNumber,
-  }) {
-    final shortName = description
-        .replaceFirst(_flipperDescriptionPrefix, '')
-        .trim();
-    return FlipperDevice(
-      id: portName,
-      name: shortName.isNotEmpty ? shortName : portName,
-      link: FlipperLink.usb,
-      source: DesktopUsbDiscoveredDevice(
-        portName,
-        description,
-        vendorId: vendorId,
-        productId: productId,
-        serialNumber: serialNumber,
-      ),
-      vendorId: vendorId,
-      productId: productId,
-      serialNumber: serialNumber,
+  bool includeDevice(FlipperDevice device) {
+    final source = device.source;
+    if (source is! DesktopUsbDiscoveredDevice) {
+      return false;
+    }
+    return cdcGrepFlip(
+      device: source.portName,
+      description: source.description,
+      hwid: source.hwid,
     );
   }
 
-  T? _readSerialProperty<T>(T? Function() read) {
-    try {
-      return read();
-    } catch (e) {
-      LogService.log('[USB] failed to read serial port metadata: $e');
-      return null;
-    }
+  @override
+  Stream<void> get usbEvents => _SerialPortWatcher.instance.events;
+
+  FlipperDevice serialDevice(ListPortInfo info) {
+    final shortName = info.description
+        .replaceFirst(_flipperDescriptionPrefix, '')
+        .trim();
+    return FlipperDevice(
+      id: info.device,
+      name: shortName.isNotEmpty ? shortName : info.device,
+      link: FlipperLink.usb,
+      source: DesktopUsbDiscoveredDevice(
+        info.device,
+        info.description,
+        hwid: info.hwid,
+        vendorId: info.vid,
+        productId: info.pid,
+        serialNumber: info.serialNumber,
+      ),
+      vendorId: info.vid,
+      productId: info.pid,
+      serialNumber: info.serialNumber,
+    );
   }
 
-  int? _readSerialInt(int? Function() read) => _readSerialProperty(read);
-
-  String? _readSerialString(String? Function() read) =>
-      _readSerialProperty(read);
+  List<FlipperDevice> comportsDevices(
+    List<ListPortInfo> Function() comports,
+  ) {
+    try {
+      return [for (final info in comports()) serialDevice(info)];
+    } catch (e) {
+      LogService.log('[USB] comports enumeration failed: $e');
+      return const [];
+    }
+  }
 }
 
 abstract class _SerialUsbTransportBase extends _Transport {

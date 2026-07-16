@@ -15,6 +15,11 @@ import 'desktop_usb_isolate.dart';
 import 'device/discovered.dart';
 import 'log_service.dart';
 import 'protobuf.dart';
+import 'usb/pyserial/cdc.dart';
+import 'usb/pyserial/list_ports_common.dart';
+import 'usb/pyserial/list_ports_linux.dart';
+import 'usb/pyserial/list_ports_osx.dart';
+import 'usb/pyserial/list_ports_windows.dart';
 
 part 'core/enums.dart';
 part 'core/exceptions.dart';

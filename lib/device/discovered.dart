@@ -61,6 +61,7 @@ class AndroidUsbDiscoveredDevice extends UsbDiscoveredDevice {
 class DesktopUsbDiscoveredDevice extends UsbDiscoveredDevice {
   final String portName;
   final String description;
+  final String hwid;
   final int? vendorId;
   final int? productId;
   final String? serialNumber;
@@ -68,6 +69,7 @@ class DesktopUsbDiscoveredDevice extends UsbDiscoveredDevice {
   DesktopUsbDiscoveredDevice(
     this.portName,
     this.description, {
+    this.hwid = 'n/a',
     this.vendorId,
     this.productId,
     this.serialNumber,
