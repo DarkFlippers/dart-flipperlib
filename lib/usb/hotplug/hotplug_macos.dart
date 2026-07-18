@@ -35,6 +35,15 @@ final _ioNotificationPortDestroy = _iokit.lookupFunction<
     Void Function(Pointer<Void>),
     void Function(Pointer<Void>)>('IONotificationPortDestroy');
 
+// Same symbol as a raw dispatch_function_t: void(*)(void* context). Its ABI
+// (one pointer argument, no return) matches dispatch_sync_f's work function, so
+// we can run the destroy *on the notifier's own queue* with the port as the
+// context — serializing it with any callout already in flight.
+final Pointer<NativeFunction<Void Function(Pointer<Void>)>>
+    _ioNotificationPortDestroyFn = _iokit
+        .lookup<NativeFunction<Void Function(Pointer<Void>)>>(
+        'IONotificationPortDestroy');
+
 final _ioServiceMatching = _iokit.lookupFunction<
     Pointer<Void> Function(Pointer<Utf8>),
     Pointer<Void> Function(Pointer<Utf8>)>('IOServiceMatching');
@@ -70,8 +79,9 @@ final _dispatchRelease = _system.lookupFunction<Void Function(Pointer<Void>),
     void Function(Pointer<Void>)>('dispatch_release');
 
 // dispatch_sync_f(queue, context, work) — runs `work(context)` on `queue` and
-// blocks until it (and everything queued ahead of it) has finished. Used as a
-// teardown barrier with free() as a harmless no-op work item (free(NULL)).
+// blocks until it (and everything queued ahead of it) has finished. Used to run
+// the notifier teardown on the notifier's own serial queue, serialized with any
+// callout in flight.
 final _dispatchSyncF = _system.lookupFunction<
     Void Function(Pointer<Void>, Pointer<Void>,
         Pointer<NativeFunction<Void Function(Pointer<Void>)>>),
@@ -79,15 +89,13 @@ final _dispatchSyncF = _system.lookupFunction<
         Pointer<NativeFunction<Void Function(Pointer<Void>)>>)>(
     'dispatch_sync_f');
 
-final Pointer<NativeFunction<Void Function(Pointer<Void>)>> _freeFn =
-    _system.lookup<NativeFunction<Void Function(Pointer<Void>)>>('free');
-
 class MacosHotplugWatcher implements UsbHotplugWatcher {
   NativeCallable<_NotifyCallbackNative>? _callable;
   Pointer<Void> _notifyPort = nullptr;
   Pointer<Void> _queue = nullptr;
   final List<int> _iterators = [];
   void Function()? _onEvent;
+  bool _active = false;
 
   @override
   bool start(void Function() onEvent) {
@@ -115,6 +123,7 @@ class MacosHotplugWatcher implements UsbHotplugWatcher {
 
       _addNotification(_kFirstMatch);
       _addNotification(_kTerminated);
+      _active = true;
       return true;
     } catch (e) {
       LogService.log('[USB] macOS IOKit hotplug arm failed: $e');
@@ -165,31 +174,51 @@ class MacosHotplugWatcher implements UsbHotplugWatcher {
   }
 
   void _onNotify(Pointer<Void> refcon, int iterator) {
+    // A .listener callback is delivered asynchronously via the isolate event
+    // loop, so a message posted before stop() can still arrive after teardown.
+    // The iterator has been released by then; touching it would be a
+    // use-after-free, so drop late deliveries.
+    if (!_active) return;
     _drain(iterator);
     _onEvent?.call();
   }
 
   @override
   void stop() {
+    _active = false;
     final port = _notifyPort;
     final queue = _queue;
     _notifyPort = nullptr;
     _queue = nullptr;
 
-    // 1. Stop delivery and cancel the dispatch source — no new callbacks after
-    //    this. A callback already running or queued still completes.
+    // Tear down the IOKit notifier so it can never invoke the FFI trampoline
+    // again — this is what prevents the process-fatal "callback invoked after
+    // it has been deleted" abort.
+    //
+    // IONotificationPortDestroy cancels the mach-recv dispatch source, but
+    // dispatch_source_cancel is asynchronous. Calling destroy from *this*
+    // (main-isolate) thread races the source's own drain on `queue`: a callout
+    // can latch and fire after destroy returns and after any barrier we submit
+    // behind it — exactly the window that produced the crash.
+    //
+    // The fix: run destroy *on the notifier's own serial queue* via
+    // dispatch_sync (the port doubles as the dispatch_function_t context). That
+    // serializes it with any callout already in flight and blocks until it
+    // finishes, and the cancel it performs forecloses all future callouts.
+    // Only once this returns is the trampoline provably unreachable, so
+    // closing the NativeCallable below can no longer be raced.
     if (port != nullptr) {
-      _ioNotificationPortDestroy(port);
+      if (queue != nullptr) {
+        try {
+          _dispatchSyncF(queue, port, _ioNotificationPortDestroyFn);
+        } catch (_) {
+          _ioNotificationPortDestroy(port);
+        }
+      } else {
+        _ioNotificationPortDestroy(port);
+      }
     }
-    // 2. Barrier: block until every callback the serial queue had in flight or
-    //    queued has finished. Only now is it safe to free the callback — this
-    //    is what prevents "callback invoked after it has been deleted".
-    if (queue != nullptr) {
-      try {
-        _dispatchSyncF(queue, nullptr, _freeFn);
-      } catch (_) {}
-    }
-    // 3. No callback can touch the iterators or the callable anymore.
+    // No callout can touch the iterators or the callable anymore.
     for (final iterator in _iterators) {
       _ioObjectRelease(iterator);
     }
