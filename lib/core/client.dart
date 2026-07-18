@@ -43,6 +43,8 @@ class FlipperClient {
   int _collectionGen = 0;
   int _watchFreezeCount = 0;
 
+  StreamSubscription<void>? _usbPresenceSub;
+
   bool _scanning = false;
   Completer<void>? _scanPhaseInterrupt;
   static const Duration _scanGraceWindow = Duration(seconds: 5);
@@ -493,6 +495,7 @@ class FlipperClient {
       );
       rethrow;
     }
+    if (device.isUsb) _ensureUsbPresenceWatch();
     _emitSessions();
     return session.device;
   }
@@ -687,6 +690,71 @@ class FlipperClient {
   void _emitSessions() {
     if (_sessionsCtrl.isClosed) return;
     _sessionsCtrl.add(sessions);
+  }
+
+  // ── USB presence watch ─────────────────────────────────────────────────────
+
+  // A live USB session must drop the moment the OS reports the port gone,
+  // not only when the transport's own read loop eventually errors out — the
+  // latter can lag for seconds after the cable is pulled. Started on the first
+  // USB connect and torn down once no USB session remains.
+  void _ensureUsbPresenceWatch() {
+    _usbPresenceSub ??= _usbPlatform.usbEvents.listen(
+      (_) => _pruneVanishedUsb(),
+    );
+  }
+
+  void _maybeStopUsbPresenceWatch() {
+    final hasUsb = _sessions.values.any(
+      (s) => s.device.isUsb && (s.isConnected || s.isConnecting),
+    );
+    if (hasUsb) return;
+    _usbPresenceSub?.cancel();
+    _usbPresenceSub = null;
+  }
+
+  Future<void> _pruneVanishedUsb() async {
+    final usbSessions = [
+      for (final s in _sessions.values)
+        if (s.device.isUsb && (s.isConnected || s.isConnecting)) s,
+    ];
+    if (usbSessions.isEmpty) {
+      _maybeStopUsbPresenceWatch();
+      return;
+    }
+
+    final Set<String> present;
+    try {
+      present = {for (final d in await _usbPlatform.loadDevices()) d.id};
+    } catch (e) {
+      LogService.log('[FlipperClient] USB presence check failed: $e');
+      return;
+    }
+
+    final vanished = [
+      for (final s in usbSessions)
+        if (!present.contains(s.device.id)) s,
+    ];
+    if (vanished.isEmpty) return;
+
+    for (final session in vanished) {
+      session.abortConnectInFlight();
+    }
+    await _serialized(() async {
+      for (final session in vanished) {
+        if (!identical(_sessions[_deviceKey(session.device)], session)) {
+          continue;
+        }
+        LogService.log(
+          '[FlipperClient] USB ${session.device.id} removed; disconnecting',
+        );
+        final wasActive = identical(_active, session);
+        await session.teardownLocked('usb removed');
+        _dropSessionLocked(session);
+        if (wasActive) _activateLocked(_mostRecentConnected());
+      }
+    });
+    _maybeStopUsbPresenceWatch();
   }
 
   // Appends a lifecycle operation to the chain. The chain never breaks: a
@@ -893,6 +961,8 @@ class FlipperClient {
   // ── Shutdown ───────────────────────────────────────────────────────────────
 
   Future<void> dispose() async {
+    await _usbPresenceSub?.cancel();
+    _usbPresenceSub = null;
     await disconnectAll();
     await stopScan();
     _devicesEmitTimer?.cancel();

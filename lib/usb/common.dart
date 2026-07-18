@@ -25,34 +25,48 @@ abstract class _UsbPlatform {
   }
 }
 
-class _SerialPortWatcher {
-  _SerialPortWatcher._();
-  static final _SerialPortWatcher instance = _SerialPortWatcher._();
+class _DesktopUsbEvents {
+  _DesktopUsbEvents._();
+  static final _DesktopUsbEvents instance = _DesktopUsbEvents._();
 
-  static const Duration _interval = Duration(seconds: 1);
+  static const Duration _pollInterval = Duration(milliseconds: 400);
 
   late final StreamController<void> _ctrl = StreamController<void>.broadcast(
     onListen: _start,
     onCancel: _stop,
   );
+  UsbHotplugWatcher? _watcher;
   Timer? _timer;
   List<String> _lastPorts = const [];
 
   Stream<void> get events => _ctrl.stream;
 
   void _start() {
+    final watcher = createUsbHotplugWatcher();
+    if (watcher != null && watcher.start(_emit)) {
+      _watcher = watcher;
+      LogService.log('[USB] event-driven hotplug notifications armed');
+      return;
+    }
+    LogService.log('[USB] hotplug events unavailable; polling port list');
     _lastPorts = _currentPorts();
-    _timer ??= Timer.periodic(_interval, (_) {
+    _timer = Timer.periodic(_pollInterval, (_) {
       final ports = _currentPorts();
       if (_sameAs(ports, _lastPorts)) return;
       _lastPorts = ports;
-      _ctrl.add(null);
+      _emit();
     });
   }
 
   void _stop() {
+    _watcher?.stop();
+    _watcher = null;
     _timer?.cancel();
     _timer = null;
+  }
+
+  void _emit() {
+    if (!_ctrl.isClosed) _ctrl.add(null);
   }
 
   List<String> _currentPorts() {
@@ -94,7 +108,7 @@ abstract class _SerialUsbPlatformBase extends _UsbPlatform {
   }
 
   @override
-  Stream<void> get usbEvents => _SerialPortWatcher.instance.events;
+  Stream<void> get usbEvents => _DesktopUsbEvents.instance.events;
 
   FlipperDevice serialDevice(ListPortInfo info) {
     final shortName = info.description
