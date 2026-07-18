@@ -69,6 +69,19 @@ final _dispatchQueueCreate = _system.lookupFunction<
 final _dispatchRelease = _system.lookupFunction<Void Function(Pointer<Void>),
     void Function(Pointer<Void>)>('dispatch_release');
 
+// dispatch_sync_f(queue, context, work) — runs `work(context)` on `queue` and
+// blocks until it (and everything queued ahead of it) has finished. Used as a
+// teardown barrier with free() as a harmless no-op work item (free(NULL)).
+final _dispatchSyncF = _system.lookupFunction<
+    Void Function(Pointer<Void>, Pointer<Void>,
+        Pointer<NativeFunction<Void Function(Pointer<Void>)>>),
+    void Function(Pointer<Void>, Pointer<Void>,
+        Pointer<NativeFunction<Void Function(Pointer<Void>)>>)>(
+    'dispatch_sync_f');
+
+final Pointer<NativeFunction<Void Function(Pointer<Void>)>> _freeFn =
+    _system.lookup<NativeFunction<Void Function(Pointer<Void>)>>('free');
+
 class MacosHotplugWatcher implements UsbHotplugWatcher {
   NativeCallable<_NotifyCallbackNative>? _callable;
   Pointer<Void> _notifyPort = nullptr;
@@ -158,19 +171,33 @@ class MacosHotplugWatcher implements UsbHotplugWatcher {
 
   @override
   void stop() {
+    final port = _notifyPort;
+    final queue = _queue;
+    _notifyPort = nullptr;
+    _queue = nullptr;
+
+    // 1. Stop delivery and cancel the dispatch source — no new callbacks after
+    //    this. A callback already running or queued still completes.
+    if (port != nullptr) {
+      _ioNotificationPortDestroy(port);
+    }
+    // 2. Barrier: block until every callback the serial queue had in flight or
+    //    queued has finished. Only now is it safe to free the callback — this
+    //    is what prevents "callback invoked after it has been deleted".
+    if (queue != nullptr) {
+      try {
+        _dispatchSyncF(queue, nullptr, _freeFn);
+      } catch (_) {}
+    }
+    // 3. No callback can touch the iterators or the callable anymore.
     for (final iterator in _iterators) {
       _ioObjectRelease(iterator);
     }
     _iterators.clear();
-    if (_notifyPort != nullptr) {
-      _ioNotificationPortDestroy(_notifyPort);
-      _notifyPort = nullptr;
-    }
-    if (_queue != nullptr) {
+    if (queue != nullptr) {
       try {
-        _dispatchRelease(_queue);
+        _dispatchRelease(queue);
       } catch (_) {}
-      _queue = nullptr;
     }
     _callable?.close();
     _callable = null;
