@@ -30,6 +30,7 @@ class FlipperNetworkResponder {
 
   final FlipperClient _client;
   final Map<int, _NetworkConnection> _connections = {};
+  final Map<int, Future<void>> _handlerChains = {};
 
   HttpClient? _httpClient;
   StreamSubscription<Main>? _notifications;
@@ -60,16 +61,42 @@ class FlipperNetworkResponder {
 
   void _onNotification(Main frame) {
     if (frame.hasNetworkConnectRequest()) {
-      unawaited(_onConnect(frame.networkConnectRequest));
+      final request = frame.networkConnectRequest;
+      _enqueueHandler(request.connectionId, () => _onConnect(request));
     } else if (frame.hasNetworkSendRequest()) {
-      unawaited(_onSend(frame.networkSendRequest));
+      final request = frame.networkSendRequest;
+      _enqueueHandler(request.connectionId, () => _onSend(request));
     } else if (frame.hasNetworkCloseRequest()) {
-      unawaited(_onClose(frame.networkCloseRequest));
+      final request = frame.networkCloseRequest;
+      _enqueueHandler(request.connectionId, () => _onClose(request));
     } else if (frame.hasNetworkHttpRequest()) {
-      unawaited(_onHttp(frame.networkHttpRequest));
+      final request = frame.networkHttpRequest;
+      _enqueueHandler(request.requestId, () => _onHttp(request));
     } else if (frame.hasNetworkWebsocketOpenRequest()) {
-      unawaited(_onWebSocketOpen(frame.networkWebsocketOpenRequest));
+      final request = frame.networkWebsocketOpenRequest;
+      _enqueueHandler(request.connectionId, () => _onWebSocketOpen(request));
     }
+  }
+
+  // Requests for one connection id run strictly in arrival order; without
+  // this, a CloseRequest can race a still-running _onConnect/_onSend of the
+  // same connection (the handlers are async and were fired unawaited).
+  // Different ids stay concurrent, so a streaming HTTP request cannot stall
+  // socket traffic.
+  void _enqueueHandler(int id, Future<void> Function() handler) {
+    final previous = _handlerChains[id] ?? Future<void>.value();
+    late final Future<void> next;
+    next = previous
+        .then((_) => handler())
+        .catchError((Object error) {
+          LogService.log('[Network] handler failed on $id: $error');
+        })
+        .whenComplete(() {
+          if (identical(_handlerChains[id], next)) {
+            _handlerChains.remove(id);
+          }
+        });
+    _handlerChains[id] = next;
   }
 
   Future<bool> _reserveSlot(int id) async {
@@ -405,10 +432,11 @@ class FlipperNetworkResponder {
   void _onSocketError(int id, Object error) {
     LogService.log('[Network] socket error on $id: $error');
     final connection = _connections.remove(id);
-    if (connection != null) {
-      unawaited(_teardown(connection));
-      NetworkTrafficMonitor.instance.connectionClosed();
-    }
+    // A late error from an already-closed connection must not produce a
+    // phantom StateChanged for an id the firmware may have moved past.
+    if (connection == null) return;
+    unawaited(_teardown(connection));
+    NetworkTrafficMonitor.instance.connectionClosed();
     unawaited(_sendStateChanged(id, ConnectionState.ERROR, _errorFor(error)));
   }
 
@@ -553,6 +581,11 @@ class FlipperNetworkResponder {
     );
   }
 
+  // Default priority on purpose: the TX queue is ordered by priority first
+  // (see _QueuedRequest.compareTo), so background data frames would be
+  // overtaken by default-priority control frames — the firmware could see
+  // SendResponse/StateChanged/HttpResponse before the data that preceded
+  // them, or time out waiting for data stuck behind default traffic.
   Future<void> _sendReceiveData(int id, Uint8List data, bool binary) {
     NetworkTrafficMonitor.instance.recordRx(data.length);
     return _send(
@@ -563,7 +596,6 @@ class FlipperNetworkResponder {
           binary: binary,
         ),
       ),
-      priority: FlipperRequestPriority.background,
     );
   }
 
