@@ -1,4 +1,4 @@
-library flipperlib_protobuf;
+library;
 
 export 'generated/flipper.pb.dart';
 export 'generated/storage.pb.dart';
