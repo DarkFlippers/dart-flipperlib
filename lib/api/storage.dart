@@ -374,60 +374,6 @@ extension FlipperStorageApi on FlipperClient {
     }
   }
 
-  /// Safe replace: uploads to a temporary sibling first, then swaps it into
-  /// [path], so the original file survives an interrupted or cancelled
-  /// transfer. The destructive window shrinks from the whole upload to the
-  /// delete+rename pair at the end. FatFS cannot rename onto an existing
-  /// name, hence the explicit delete of the original before the rename.
-  Future<void> storageWriteChunkedSafe(
-    String path,
-    List<int> data, {
-    void Function(double progress)? onProgress,
-    Duration timeout = const Duration(seconds: 300),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
-    bool Function()? isCancelled,
-  }) async {
-    final tempPath = '$path.tmp';
-    try {
-      await storageWriteChunked(
-        tempPath,
-        data,
-        onProgress: onProgress,
-        timeout: timeout,
-        priority: priority,
-        isCancelled: isCancelled,
-      );
-    } catch (e) {
-      // Cancelled uploads clean up after themselves inside storageWriteChunked;
-      // other failures may leave a partial temp file behind — remove it while
-      // the session is still alive so it does not accumulate on the SD card.
-      if (e is! FlipperWriteCancelledException && isConnected) {
-        unawaited(_deletePartialWrite(tempPath));
-      }
-      rethrow;
-    }
-
-    try {
-      await storageDelete(DeleteRequest(path: path), priority: priority);
-    } on FlipperRpcStorageNotExistException {
-      // First write to this path: nothing to replace.
-    }
-    try {
-      await storageRename(
-        RenameRequest(oldPath: tempPath, newPath: path),
-        priority: priority,
-      );
-    } catch (e) {
-      // The original may already be deleted at this point; the uploaded data
-      // is intact at tempPath — say so instead of reporting a bare failure.
-      throw StateError(
-        'Replacing "$path" failed after upload; '
-        'the uploaded data is at "$tempPath": $e',
-      );
-    }
-    LogService.log('[Storage] safe write "$path" complete');
-  }
-
   Future<List<Main>> storageTarExtract(
     TarExtractRequest request, {
     Duration timeout = const Duration(seconds: 8),
