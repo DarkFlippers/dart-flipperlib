@@ -3,8 +3,6 @@
 .DS_Store
 .dart_tool/
 .packages
-tools/protoc/
-tools/protoc.zip
 
 # Miscellaneous
 *.class

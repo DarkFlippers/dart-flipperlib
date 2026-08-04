@@ -1,0 +1,97 @@
+name: Protobuf generate and release
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - "proto/**"
+      - ".github/scripts/build_protobuf.sh"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: protobuf-release
+  cancel-in-progress: false
+
+jobs:
+  generate-and-release:
+    name: Regenerate Dart protobuf and publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      PROTOC_VERSION: "34.1"
+      PROTOC_PLUGIN_VERSION: "25.0.0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Regenerate Dart protobuf
+        run: bash .github/scripts/build_protobuf.sh
+
+      - name: Commit regenerated sources
+        id: commit
+        shell: bash
+        run: |
+          git add lib/src/proto/generated lib/protobuf.dart
+          if git diff --cached --quiet; then
+            echo "No generated changes to commit."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "Protobuf: regenerate Dart API from proto submodule"
+            git push origin "HEAD:${GITHUB_REF_NAME:-dev}"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Read protobuf version from Changelog
+        id: version
+        shell: bash
+        run: |
+          version="$(sed -nE 's/^## \[([0-9]+\.[0-9]+)\].*/\1/p' proto/flipperzero/Changelog | head -n 1)"
+          if [ -z "$version" ]; then
+            echo "::error::Could not parse version from proto/flipperzero/Changelog"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=proto-$version" >> "$GITHUB_OUTPUT"
+          echo "Protobuf version: $version"
+
+      - name: Extract changelog section
+        shell: bash
+        run: |
+          awk '/^## \[/{n++} n==1' proto/flipperzero/Changelog > release-notes.md
+          cat release-notes.md
+
+      - name: Pack generated sources
+        shell: bash
+        run: |
+          (cd lib/src/proto && zip -qr "$GITHUB_WORKSPACE/dart-protobuf-${{ steps.version.outputs.version }}.zip" generated)
+
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.version.outputs.tag }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; skipping."
+            exit 0
+          fi
+          gh release create "$tag" \
+            --target "${{ steps.commit.outputs.sha }}" \
+            --title "Protobuf ${{ steps.version.outputs.version }}" \
+            --notes-file release-notes.md \
+            "dart-protobuf-${{ steps.version.outputs.version }}.zip"
