@@ -148,7 +148,7 @@ class FlipperSession {
       throw StateError('Connection attempt superseded');
     }
 
-    transport = transport;
+    this.transport = transport;
     _linkPhase = LinkPhase.connected;
     _announcedConnecting = false;
     _transportSub = transport.bytesStream.listen(
@@ -1247,8 +1247,8 @@ class FlipperSession {
     Object? closeReason,
     bool reconnecting = false,
   }) {
-    if (mode == mode) return;
-    mode = mode;
+    if (this.mode == mode) return;
+    this.mode = mode;
     if (!modeCtrl.isClosed) modeCtrl.add(mode);
     if (connectionCtrl.isClosed) return;
     connectionCtrl.add(
