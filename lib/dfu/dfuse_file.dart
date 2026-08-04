@@ -4,7 +4,7 @@
 // DfuSe download routine flashes. All multi-byte fields are little-endian.
 import 'dart:typed_data';
 
-import '../log_service.dart';
+import '../log.dart';
 
 class DfuseElement {
   DfuseElement(this.address, this.data);
@@ -35,12 +35,12 @@ class DfuseFile {
 
     // ── Prefix (11 bytes) ──
     if (bytes.length < 11) {
-      LogService.log('[DFU] DfuSe file too short');
+      Log.error('[DFU] DfuSe file too short');
       return DfuseFile._(images, false);
     }
     final signature = String.fromCharCodes(r.read(5));
     if (signature != 'DfuSe') {
-      LogService.log('[DFU] not a valid DfuSe file (sig="$signature")');
+      Log.info('[DFU] not a valid DfuSe file (sig="$signature")');
       return DfuseFile._(images, false);
     }
     r.u8(); // bVersion
@@ -48,7 +48,7 @@ class DfuseFile {
     final bTargets = r.u8();
 
     if (dfuImageSize != bytes.length - _suffixSize) {
-      LogService.log('[DFU] DfuSe image size mismatch');
+      Log.error('[DFU] DfuSe image size mismatch');
       return DfuseFile._(images, false);
     }
 
@@ -69,13 +69,13 @@ class DfuseFile {
     final bLength = r.u8();
     final dwCRC = r.u32();
     if (ucDfuSignature != 0x444655 || bLength != _suffixSize) {
-      LogService.log('[DFU] invalid DfuSe suffix');
+      Log.error('[DFU] invalid DfuSe suffix');
       return DfuseFile._(images, false);
     }
 
     // ── CRC over everything but the trailing dwCRC field ──
     if (_crc(bytes) != dwCRC) {
-      LogService.log('[DFU] DfuSe checksum mismatch');
+      Log.error('[DFU] DfuSe checksum mismatch');
       return DfuseFile._(images, false);
     }
 
@@ -85,7 +85,7 @@ class DfuseFile {
   static DfuseImage? _readImage(_Reader r) {
     final signature = String.fromCharCodes(r.read(6));
     if (signature != 'Target') {
-      LogService.log('[DFU] not a valid DfuSe target image');
+      Log.info('[DFU] not a valid DfuSe target image');
       return null;
     }
     final alternateSetting = r.u8();

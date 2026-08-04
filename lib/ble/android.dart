@@ -8,7 +8,7 @@ class _AndroidBlePlatform extends _UniversalBlePlatformBase {
     try {
       await uble.UniversalBle.requestPermissions(withAndroidFineLocation: true);
     } catch (e) {
-      LogService.log(
+      Log.error(
         '[FlipperClient] Android BLE permission request failed: $e',
       );
     }

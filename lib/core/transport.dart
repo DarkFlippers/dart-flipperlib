@@ -101,7 +101,7 @@ abstract class _Transport {
     if (_lifecycle == _TransportLifecycle.closed) return;
     _lifecycle = _TransportLifecycle.closed;
     _closeReason = reason;
-    LogService.log('[Transport] fault: $reason');
+    Log.error('[Transport] fault: $reason');
     _failPendingWrites(reason);
     onFaultExtra(reason);
     if (!_bytesCtrl.isClosed) {
@@ -120,7 +120,7 @@ abstract class _Transport {
     try {
       await doClose();
     } catch (e) {
-      LogService.log('[Transport] doClose error: $e');
+      Log.error('[Transport] doClose error: $e');
     }
     _lifecycle = _TransportLifecycle.closed;
     if (!_bytesCtrl.isClosed) {

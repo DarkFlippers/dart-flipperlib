@@ -8,7 +8,7 @@ class _MacosBlePlatform extends _UniversalBlePlatformBase {
     try {
       await uble.UniversalBle.requestPermissions();
     } catch (e) {
-      LogService.log('[FlipperClient] macOS BLE permission request failed: $e');
+      Log.error('[FlipperClient] macOS BLE permission request failed: $e');
     }
   }
 
@@ -23,7 +23,7 @@ class _MacosBlePlatform extends _UniversalBlePlatformBase {
           .where(includeDevice)
           .toList(growable: false);
     } catch (e) {
-      LogService.log('[FlipperClient] known BLE devices lookup failed: $e');
+      Log.error('[FlipperClient] known BLE devices lookup failed: $e');
       return const <BleDiscoveredDevice>[];
     }
   }
@@ -54,7 +54,7 @@ class _MacosBleTransport extends _UniversalBleTransportBase {
     // fall back to the stable payload cap (see _maxBleMtuSize).
     if (transport._bleMtuSize < 100) {
       transport._bleMtuSize = _UniversalBleTransportBase._maxBleMtuSize;
-      LogService.log(
+      Log.info(
         '[BLE] macOS: MTU not negotiated, using mtu=${transport._bleMtuSize}',
       );
     }
@@ -70,6 +70,6 @@ class _MacosBleTransport extends _UniversalBleTransportBase {
     // 300 ms settle for exactly this reason.  The pause is harmless — it is well
     // below the BLE supervision timeout and no GATT operations are in flight.
     await Future.delayed(const Duration(milliseconds: 300));
-    LogService.log('[BLE] macOS: connection parameter settle complete');
+    Log.info('[BLE] macOS: connection parameter settle complete');
   }
 }

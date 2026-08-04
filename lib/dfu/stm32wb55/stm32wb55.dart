@@ -4,7 +4,7 @@
 // DfuSe protocol. Runs in an isolate (blocking USB I/O).
 import 'dart:typed_data';
 
-import '../../log_service.dart';
+import '../../log.dart';
 import '../dfuse_device.dart';
 import 'fus_state.dart';
 import 'option_bytes.dart';
@@ -40,7 +40,7 @@ class Stm32Wb55 extends DfuseDevice {
   OptionBytes optionBytes() {
     final data = upload(_optionBytesAddr, OptionBytes.sizeBytes, WbPartition.optionBytes);
     if (data.length != OptionBytes.sizeBytes) {
-      LogService.log('[DFU] failed to read option bytes');
+      Log.error('[DFU] failed to read option bytes');
       return OptionBytes.invalid();
     }
     return OptionBytes.fromDeviceData(data);
@@ -61,7 +61,7 @@ class Stm32Wb55 extends DfuseDevice {
       WbPartition.optionBytes,
     );
     if (data.length != OptionBytes.sizeBytes) {
-      LogService.log('[DFU] failed to read raw option bytes');
+      Log.error('[DFU] failed to read raw option bytes');
       return Uint8List(0);
     }
     return data;
@@ -78,7 +78,7 @@ class Stm32Wb55 extends DfuseDevice {
     final n = len < _otpMaxSize ? len : _otpMaxSize;
     final data = upload(_otpAddr, n, WbPartition.otp);
     if (data.length != n) {
-      LogService.log('[DFU] failed to read OTP');
+      Log.error('[DFU] failed to read OTP');
       return Uint8List(0);
     }
     return data;
@@ -87,7 +87,7 @@ class Stm32Wb55 extends DfuseDevice {
   FusState fusGetState() {
     final data = upload(_fusStatusAddr, _fusStatusSize, WbPartition.flash);
     if (data.length != _fusStatusSize) {
-      LogService.log('[DFU] failed to read FUS status');
+      Log.error('[DFU] failed to read FUS status');
       return FusState.invalid;
     }
     return FusState(data[0], data[1]);
@@ -105,7 +105,7 @@ class Stm32Wb55 extends DfuseDevice {
     if (ptr.length != 4) return WbVersionInfo.unknown;
     final addr = ByteData.sublistView(ptr).getUint32(0, Endian.little);
     if (addr < _sram2aBase) {
-      LogService.log('[DFU] invalid info-table address 0x${addr.toRadixString(16)}');
+      Log.error('[DFU] invalid info-table address 0x${addr.toRadixString(16)}');
       return WbVersionInfo.unknown;
     }
 

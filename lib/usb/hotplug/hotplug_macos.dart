@@ -2,7 +2,7 @@ import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
 
-import '../../log_service.dart';
+import '../../log.dart';
 import 'usb_hotplug.dart';
 
 // IOKit service-matching notifications on IOSerialBSDClient, delivered on a
@@ -126,7 +126,7 @@ class MacosHotplugWatcher implements UsbHotplugWatcher {
       _active = true;
       return true;
     } catch (e) {
-      LogService.log('[USB] macOS IOKit hotplug arm failed: $e');
+      Log.error('[USB] macOS IOKit hotplug arm failed: $e');
       stop();
       return false;
     }

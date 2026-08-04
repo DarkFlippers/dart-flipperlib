@@ -3,7 +3,7 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
-import '../../log_service.dart';
+import '../../log.dart';
 import 'usb_hotplug.dart';
 
 // A hidden top-level window on a background isolate, subscribed to device
@@ -95,7 +95,7 @@ class WindowsHotplugWatcher implements UsbHotplugWatcher {
       if (msg is int) {
         _hwnd = msg;
       } else if (msg == 'error') {
-        LogService.log('[USB] Windows device-notify window failed to start');
+        Log.error('[USB] Windows device-notify window failed to start');
       } else {
         _onEvent?.call();
       }
@@ -104,7 +104,7 @@ class WindowsHotplugWatcher implements UsbHotplugWatcher {
     Isolate.spawn(_windowEntry, recv.sendPort).then((iso) {
       _isolate = iso;
     }, onError: (Object e) {
-      LogService.log('[USB] Windows hotplug isolate spawn failed: $e');
+      Log.error('[USB] Windows hotplug isolate spawn failed: $e');
     });
     return true;
   }

@@ -2,7 +2,7 @@
 // (.sources/qflipper/dfu/dfumemorylayout.cpp). Parses the alt-setting string
 // descriptor (e.g. "@Internal Flash /0x08000000/256*004Kg") into the page
 // banks needed to compute per-page erase addresses.
-import '../log_service.dart';
+import '../log.dart';
 
 class DfuPageBank {
   DfuPageBank({
@@ -31,7 +31,7 @@ class DfuMemoryLayout {
 
     final fields = desc.split('/');
     if (fields.length != 3) {
-      LogService.log('[DFU] bad memory-layout descriptor syntax: "$desc"');
+      Log.info('[DFU] bad memory-layout descriptor syntax: "$desc"');
       return empty;
     }
 
@@ -47,7 +47,7 @@ class DfuMemoryLayout {
     for (final bank in fields[2].split(',')) {
       final bankFields = bank.split('*');
       if (bankFields.length != 2) {
-        LogService.log('[DFU] bad page-bank syntax: "$bank"');
+        Log.info('[DFU] bad page-bank syntax: "$bank"');
         return empty;
       }
       final pageCount = int.tryParse(bankFields.first.trim()) ?? 0;
@@ -57,7 +57,7 @@ class DfuMemoryLayout {
       // digits are the size.
       final sizeStr = bankFields.last;
       if (sizeStr.length < 2) {
-        LogService.log('[DFU] bad page-size token: "$sizeStr"');
+        Log.info('[DFU] bad page-size token: "$sizeStr"');
         return empty;
       }
       final unitChar = sizeStr[sizeStr.length - 2];
@@ -80,11 +80,11 @@ class DfuMemoryLayout {
   List<int> pageAddresses(int start, int end) {
     final ret = <int>[];
     if (start < address || start > end) {
-      LogService.log('[DFU] erase address error (start=$start end=$end)');
+      Log.error('[DFU] erase address error (start=$start end=$end)');
       return ret;
     }
     if (pageBanks.isEmpty) {
-      LogService.log('[DFU] page banks empty');
+      Log.info('[DFU] page banks empty');
       return ret;
     }
 

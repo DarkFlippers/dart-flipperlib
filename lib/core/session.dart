@@ -107,7 +107,7 @@ class _FlipperSession {
     // moment the transport is committed (kept in lockstep with `_transport`).
     _linkPhase = _LinkPhase.connecting;
     _emitConnecting();
-    LogService.log(
+    Log.info(
       '[FlipperClient] connecting to ${device.name} '
       '(${device.link.name}:${device.id})',
     );
@@ -118,7 +118,7 @@ class _FlipperSession {
     } catch (error) {
       _linkPhase = _LinkPhase.disconnected;
       _clearConnecting();
-      LogService.log(
+      Log.error(
         '[FlipperClient] connect failed '
         'device=${device.name} link=${device.link.name}: $error',
       );
@@ -142,7 +142,7 @@ class _FlipperSession {
         // Transports report failures via onTransportFault and never put error
         // events on bytesStream; defensive guard against a misbehaving
         // backend.
-        LogService.log('[FlipperClient] transport stream error: $error');
+        Log.error('[FlipperClient] transport stream error: $error');
         _scheduleFaultRecovery(gen, error);
       },
       onDone: () => _onTransportClosed(transport!),
@@ -153,11 +153,11 @@ class _FlipperSession {
     _sessionUptime
       ..reset()
       ..start();
-    LogService.log('[FlipperClient] connected to ${device.name}');
+    Log.info('[FlipperClient] connected to ${device.name}');
     if (autoRpc && transport.supportsCli) {
       unawaited(
         switchToRpcMode().catchError((Object error) {
-          LogService.log('[FlipperClient] automatic RPC switch failed: $error');
+          Log.error('[FlipperClient] automatic RPC switch failed: $error');
         }),
       );
     }
@@ -254,7 +254,7 @@ class _FlipperSession {
   // link. Exactly one connect attempt — on failure the session ends with the
   // original fault reason.
   Future<void> _reconnectLocked(Object reason) async {
-    LogService.log(
+    Log.info(
       '[FlipperClient] link lost: $reason; reconnecting to ${device.name}',
     );
     _sessionGen++;
@@ -296,7 +296,7 @@ class _FlipperSession {
     try {
       await establishLocked();
     } catch (error) {
-      LogService.log('[FlipperClient] reconnect failed: $error');
+      Log.error('[FlipperClient] reconnect failed: $error');
       await teardownLocked(reason);
       // The mode is already `disconnected`, so _setMode stayed silent; emit
       // the final (non-reconnecting) state explicitly so listeners leave the
@@ -314,7 +314,7 @@ class _FlipperSession {
       _client._onSessionEnded(this);
       return;
     }
-    LogService.log('[FlipperClient] reconnected to ${device.name}');
+    Log.info('[FlipperClient] reconnected to ${device.name}');
   }
 
   // Fails commands that already (partially) reached the wire — their
@@ -353,7 +353,7 @@ class _FlipperSession {
     final detailedReason = active == null
         ? reason
         : FlipperTransportError('$reason; active ${active.describe()}');
-    LogService.log('[FlipperClient] transport closed: $detailedReason');
+    Log.error('[FlipperClient] transport closed: $detailedReason');
     _scheduleFaultRecovery(_sessionGen, detailedReason);
   }
 
@@ -392,7 +392,7 @@ class _FlipperSession {
       timeout: const Duration(seconds: 5),
       trigger: transport.nudgeCli,
     );
-    LogService.log(
+    Log.info(
       promptSeen != null
           ? '[RPC] CLI prompt detected'
           : '[RPC] CLI prompt not seen within 5s, continuing',
@@ -404,7 +404,7 @@ class _FlipperSession {
       timeout: const Duration(seconds: 2),
       trigger: () => transport.writeAscii(FlipperClient.startRpcSession),
     );
-    LogService.log(
+    Log.info(
       echoed != null
           ? '[RPC] start_rpc_session echo received'
           : '[RPC] start_rpc_session echo not seen, may already be in RPC mode',
@@ -416,7 +416,7 @@ class _FlipperSession {
     _frameBuffer.clear();
     _setMode(FlipperMode.rpc);
     _signalWorker();
-    LogService.log('[RPC] RPC mode active');
+    Log.info('[RPC] RPC mode active');
   }
 
   Future<void> switchToCliMode() => _client._serialized(_switchToCliLocked);
@@ -563,7 +563,7 @@ class _FlipperSession {
     if (trigger != null) {
       unawaited(
         trigger().catchError((Object error) {
-          LogService.log('[CLI] trigger write failed: $error');
+          Log.error('[CLI] trigger write failed: $error');
         }),
       );
     }
@@ -787,7 +787,7 @@ class _FlipperSession {
     final detailed = active == null
         ? message
         : '$message; active ${active.describe()}';
-    LogService.log('[RPC] timeout: $detailed');
+    Log.error('[RPC] timeout: $detailed');
     final pending = _pendingRpc.remove(commandId);
     _removeQueuedCommand(commandId, 'timeout before TX');
     _releaseTxGroup(commandId);
@@ -817,7 +817,7 @@ class _FlipperSession {
       return true;
     });
     if (removed.isEmpty) return;
-    LogService.log(
+    Log.info(
       '[RPC] dropped ${removed.length} queued frame(s) '
       'for cmdId=$commandId: $reason',
     );
@@ -915,7 +915,7 @@ class _FlipperSession {
         break;
       }
       if (writeError != null) {
-        LogService.log('[RPC] tx failed ${request.describe()}: $writeError');
+        Log.error('[RPC] tx failed ${request.describe()}: $writeError');
         _activeRequest = null;
         _releaseTxGroup(frame.commandId);
         request.fail(
@@ -927,8 +927,8 @@ class _FlipperSession {
         // schedules the teardown.
         continue;
       }
-      if (LogService.enabled) {
-        LogService.log(
+      if (Log.debugOn) {
+        Log.debug(
           '[RPC] tx ok ${request.describe()} bytes=${encoded.length}',
         );
       }
@@ -962,8 +962,8 @@ class _FlipperSession {
     if (_mode == FlipperMode.rpc) {
       final result = _frameBuffer.push(chunk, onParseError: _onFrameParseError);
       if (result.frames.isEmpty) {
-        if (LogService.enabled) {
-          LogService.log(
+        if (Log.debugOn) {
+          Log.debug(
             '[RPC] rx ${chunk.length} bytes buffered '
             '(${result.pendingState ?? 'no pending frame'})',
           );
@@ -977,11 +977,11 @@ class _FlipperSession {
         try {
           _routeFrame(frame);
         } catch (error) {
-          LogService.log('[RPC] frame routing threw: $error');
+          Log.error('[RPC] frame routing threw: $error');
         }
       }
-      if (LogService.enabled && result.pendingState != null) {
-        LogService.log(
+      if (Log.debugOn && result.pendingState != null) {
+        Log.debug(
           '[RPC] parsed ${result.frames.length} frame(s), residual '
           '${result.pendingState}',
         );
@@ -990,8 +990,8 @@ class _FlipperSession {
     }
 
     final text = _utf8Decoder.convert(chunk);
-    if (LogService.enabled) {
-      LogService.log(
+    if (Log.debugOn) {
+      Log.debug(
         '[CLI] rx: ${text.replaceAll('\r', '\\r').replaceAll('\n', '\\n')}',
       );
     }
@@ -1022,9 +1022,9 @@ class _FlipperSession {
 
     final commandId = frame.commandId;
     if (commandId == 0) {
-      if (LogService.enabled) {
+      if (Log.debugOn) {
         // Broadcasts arrive at screen-streaming frame rate; keep this cheap.
-        LogService.log(
+        Log.debug(
           '[RPC] rx broadcast content=${frame.whichContent().name}',
         );
       }
@@ -1035,7 +1035,7 @@ class _FlipperSession {
       if (frame.commandStatus == CommandStatus.ERROR_DECODE) {
         // The firmware lost protobuf framing on its RX side; it closes the
         // RPC session right after sending this (and restarts its BLE stack).
-        LogService.log('[RPC] firmware reported ERROR_DECODE; session is dead');
+        Log.error('[RPC] firmware reported ERROR_DECODE; session is dead');
         _scheduleFaultRecovery(
           _sessionGen,
           FlipperTransportError(
@@ -1056,18 +1056,18 @@ class _FlipperSession {
         // Expected aftermath of a timed-out multi-frame command: the firmware
         // closes the abandoned write stream when the next command arrives and
         // reports it against the old (already failed) commandId.
-        LogService.log(
+        Log.info(
           '[RPC] firmware closed interrupted stream cmdId=$commandId '
           '(command already timed out locally)',
         );
         return;
       }
-      LogService.log('[RPC] rx unmatched frame cmdId=$commandId');
+      Log.error('[RPC] rx unmatched frame cmdId=$commandId');
       return;
     }
 
-    if (LogService.enabled) {
-      LogService.log(
+    if (Log.debugOn) {
+      Log.debug(
         '[RPC] rx frame cmdId=$commandId hasNext=${frame.hasNext} '
         'status=${frame.commandStatus.name} '
         'content=${frame.whichContent().name} '
@@ -1094,7 +1094,7 @@ class _FlipperSession {
 
   void _onFrameParseError(Object error) {
     _rxParseErrorStreak++;
-    LogService.log(
+    Log.error(
       '[RPC] rx parse error '
       '($_rxParseErrorStreak/${FlipperClient._maxRxParseErrorStreak}): '
       '$error',
@@ -1180,7 +1180,7 @@ class _FlipperSession {
         retainFrames: false,
       );
     } catch (error) {
-      LogService.log('[FlipperClient] device info fetch failed: $error');
+      Log.error('[FlipperClient] device info fetch failed: $error');
       rethrow;
     }
     if (gen != _sessionGen) {

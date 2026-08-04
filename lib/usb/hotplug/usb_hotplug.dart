@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import '../../log_service.dart';
+import '../../log.dart';
 import 'hotplug_linux.dart';
 import 'hotplug_macos.dart';
 import 'hotplug_windows.dart';
@@ -24,7 +24,7 @@ UsbHotplugWatcher? createUsbHotplugWatcher() {
     if (Platform.isLinux) return LinuxHotplugWatcher();
     if (Platform.isWindows) return WindowsHotplugWatcher();
   } catch (e) {
-    LogService.log('[USB] native hotplug watcher unavailable: $e');
+    Log.error('[USB] native hotplug watcher unavailable: $e');
   }
   return null;
 }

@@ -78,7 +78,7 @@ class _AndroidUsbTransport extends _Transport {
     _inputSub = _port.inputStream?.listen(
       addBytes,
       onError: (Object error, StackTrace stackTrace) {
-        LogService.log('[FlipperClient] Android USB read error: $error');
+        Log.error('[FlipperClient] Android USB read error: $error');
         onTransportFault(error);
       },
       onDone: () {
@@ -125,7 +125,7 @@ class _AndroidUsbTransport extends _Transport {
     try {
       await _port.close();
     } catch (e) {
-      LogService.log('[FlipperClient] Android USB close error: $e');
+      Log.error('[FlipperClient] Android USB close error: $e');
     }
   }
 }

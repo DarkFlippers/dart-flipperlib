@@ -149,7 +149,7 @@ class _UniversalBleOps implements _BleOps {
     bool withoutResponse = false,
   }) async {
     // Per-chunk hot path: skip the stopwatch and message building in release.
-    if (!LogService.enabled) {
+    if (!Log.debugOn) {
       return uble.UniversalBle.write(
         deviceId,
         svcId,
@@ -168,12 +168,12 @@ class _UniversalBleOps implements _BleOps {
         data,
         withoutResponse: withoutResponse,
       );
-      LogService.log(
+      Log.debug(
         '[UniversalBle] write done len=${data.length} mode=$mode '
         'elapsedMs=${stopwatch.elapsedMilliseconds}',
       );
     } catch (error) {
-      LogService.log(
+      Log.debug(
         '[UniversalBle] write failed len=${data.length} mode=$mode '
         'elapsedMs=${stopwatch.elapsedMilliseconds} error=$error',
       );
@@ -414,7 +414,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
     if (pairing != null && !pairing.isCompleted) pairing.complete();
     unawaited(
       _ops.disconnect(_device.device.deviceId).catchError((Object e) {
-        LogService.log('[BLE] abort-connect cancel failed: $e');
+        Log.error('[BLE] abort-connect cancel failed: $e');
       }),
     );
   }
@@ -474,7 +474,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
         _link = _BleLinkState.disconnected;
         unawaited(
           _ops.disconnect(deviceId).catchError((Object e) {
-            LogService.log('[BLE] cleanup disconnect failed: $e');
+            Log.error('[BLE] cleanup disconnect failed: $e');
           }),
         );
       }
@@ -489,7 +489,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
           .requestMtu(deviceId, 517)
           .timeout(_gattOpTimeout);
     } catch (e) {
-      LogService.log(
+      Log.error(
         '[BLE] requestMtu failed: $e (using default $negotiatedMtu)',
       );
     }
@@ -575,7 +575,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
     _rxCharIdLower = _rxCharId.toLowerCase();
     _overflowCharIdLower = _overflowCharId!.toLowerCase();
     _rpcStatusCharIdLower = _rpcStatusCharId!.toLowerCase();
-    LogService.log(
+    Log.info(
       '[BLE] configured: negotiatedMtu=$negotiatedMtu mtu=$_bleMtuSize '
       'txWithResponse=$_txWithResponse',
     );
@@ -616,7 +616,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
           }
           if (!_isPairingDrop(e)) rethrow;
           attempt++;
-          LogService.log(
+          Log.info(
             '[BLE] link dropped during first-time pairing (attempt $attempt); '
             'reconnecting so the user can finish entering the PIN',
           );
@@ -645,7 +645,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
       ..start();
     _bytesWrittenSinceOpen = 0;
     _startSender();
-    LogService.log('[BLE] transport open (rpcSession=$_rpcSessionActive)');
+    Log.info('[BLE] transport open (rpcSession=$_rpcSessionActive)');
   }
 
   // Awaits a setup GATT operation, but bails out the instant the link drops
@@ -714,7 +714,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
         // else is a real error.
         if (!_isInsufficientEncryption(e) && e is! TimeoutException) rethrow;
         if (!logged) {
-          LogService.log(
+          Log.info(
             '[BLE] encrypted characteristic needs pairing; awaiting PIN entry '
             '(retrying without tearing the link down)',
           );
@@ -828,7 +828,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
     if (_budget <= 0) {
       _budget = _rpcBufferSize;
       _budgetGen += 1;
-      LogService.log(
+      Log.info(
         '[BLE] initial overflow credit was 0; seeding RPC_BUFFER_SIZE '
         '($_rpcBufferSize) on fresh connection',
       );
@@ -886,7 +886,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
       // connectFuture may have failed; confirm the link is actually up.
       final state = await _ops.getConnectionState(deviceId);
       if (state != _BleConnState.connected) {
-        LogService.log('[BLE] pairing reconnect: link not up yet, retrying');
+        Log.info('[BLE] pairing reconnect: link not up yet, retrying');
         continue;
       }
       _link = _BleLinkState.established;
@@ -895,7 +895,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
       try {
         await _ops.discoverServices(deviceId).timeout(_gattOpTimeout);
       } catch (e) {
-        LogService.log('[BLE] pairing reconnect: discoverServices failed: $e');
+        Log.error('[BLE] pairing reconnect: discoverServices failed: $e');
         continue;
       }
       _link = _BleLinkState.connected;
@@ -919,7 +919,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
       // Without rpcStatus, session readiness cannot be observed; fall back to
       // ungated TX instead of holding the queue forever.
       _rpcStatusAvailable = false;
-      LogService.log('[BLE] rpcStatus unavailable, TX gating disabled: $e');
+      Log.error('[BLE] rpcStatus unavailable, TX gating disabled: $e');
     }
   }
 
@@ -948,7 +948,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
     final sessionUpMs = _sessionOpenAt.isRunning
         ? '${_sessionOpenAt.elapsedMilliseconds}'
         : 'setup-incomplete';
-    LogService.log(
+    Log.info(
       '[BLE] disconnect diagnostics: cause=$cause '
       'linkUpMs=$linkUpMs sessionUpMs=$sessionUpMs '
       'bytesWrittenSinceOpen=$_bytesWrittenSinceOpen mtu=$_bleMtuSize '
@@ -971,7 +971,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
       _disconnectSignal = null;
       _fireOnce(signal);
       _fireOnce(_setupGuard);
-      LogService.log(
+      Log.info(
         '[BLE] pairing-phase link drop; reconnecting (transport kept alive)',
       );
       return;
@@ -1061,13 +1061,13 @@ abstract class _UniversalBleTransportBase extends _Transport {
     } else if (bytes.length >= 2) {
       remaining = view.getUint16(0, Endian.big);
     } else {
-      LogService.log('[BLE] overflow value too short (${bytes.length} bytes)');
+      Log.error('[BLE] overflow value too short (${bytes.length} bytes)');
       return;
     }
     _budget = remaining;
     _budgetGen += 1;
-    if (LogService.enabled) {
-      LogService.log(
+    if (Log.debugOn) {
+      Log.debug(
         '[BLE] credit granted: $remaining bytes (gen $_budgetGen)',
       );
     }
@@ -1080,7 +1080,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
     final active = value.any((b) => b != 0);
     if (active == _rpcSessionActive) return;
     _rpcSessionActive = active;
-    LogService.log('[BLE] rpcSession=${active ? 'active' : 'inactive'}');
+    Log.info('[BLE] rpcSession=${active ? 'active' : 'inactive'}');
     if (active) {
       final signal = _rpcActiveSignal;
       _rpcActiveSignal = null;
@@ -1139,7 +1139,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
         }
         sessionPolls++;
         if (sessionPolls == 1) {
-          LogService.log('[BLE] TX held: firmware RPC session not active');
+          Log.info('[BLE] TX held: firmware RPC session not active');
         }
         if (sessionPolls >= _stallPollLimit && isActive) {
           onTransportFault(
@@ -1165,7 +1165,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
         if (budgetPolls == 1) {
           // Reading the characteristic would return its stored value, not a
           // fresh credit, and could overrun the firmware's 1024-byte buffer.
-          LogService.log('[BLE] TX held: waiting for overflow credit');
+          Log.info('[BLE] TX held: waiting for overflow credit');
         }
         if (budgetPolls >= _stallPollLimit && isActive) {
           onTransportFault(
@@ -1277,7 +1277,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
             'link presumed dead',
           );
         }
-        LogService.log(
+        Log.info(
           '[BLE] write callback timed out; continuing without retry',
         );
       }
@@ -1340,7 +1340,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
     _releaseSenderSignals();
     _failAllPending(StateError('BLE transport closed'));
     if (!identical(_connectionOwner, this)) {
-      LogService.log(
+      Log.info(
         '[BLE] stale transport closed without platform disconnect '
         '(newer transport owns ${_device.device.deviceId})',
       );
@@ -1362,7 +1362,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
       try {
         await _ops.disconnect(_device.device.deviceId);
       } catch (e) {
-        LogService.log('[BLE] disconnect failed: $e');
+        Log.error('[BLE] disconnect failed: $e');
       }
       _markBleDisconnected();
       _clearBleCallbacks();
@@ -1379,7 +1379,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
     try {
       await _ops.disconnect(_device.device.deviceId);
     } catch (e) {
-      LogService.log('[BLE] disconnect failed: $e');
+      Log.error('[BLE] disconnect failed: $e');
       _markBleDisconnected();
       _clearBleCallbacks();
       return;
@@ -1388,7 +1388,7 @@ abstract class _UniversalBleTransportBase extends _Transport {
       disconnectSignal,
       const Duration(seconds: 5),
     );
-    LogService.log(
+    Log.info(
       confirmed
           ? '[BLE] disconnected'
           : '[BLE] disconnect event not confirmed within 5s',

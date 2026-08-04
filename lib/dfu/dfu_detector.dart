@@ -9,7 +9,7 @@ import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
 
-import '../log_service.dart';
+import '../log.dart';
 import 'libusb/libusb.dart';
 
 /// STM32 system bootloader USB identity — what a Flipper enumerates as in DFU.
@@ -40,7 +40,7 @@ class DfuUsb {
     try {
       final err = usb.init(out);
       if (err != libusbSuccess) {
-        LogService.log('[DFU] libusb_init failed: ${usb.errorString(err)}');
+        Log.error('[DFU] libusb_init failed: ${usb.errorString(err)}');
         _initFailed = true;
         return false;
       }
@@ -111,7 +111,7 @@ class DfuUsb {
     try {
       final count = usb.getDeviceList(_ctx, listOut);
       if (count < 0) {
-        LogService.log('[DFU] getDeviceList failed: ${usb.errorString(count)}');
+        Log.error('[DFU] getDeviceList failed: ${usb.errorString(count)}');
         return orElse;
       }
       final list = listOut.value;
@@ -158,7 +158,7 @@ class DfuDetector {
     final present = DfuUsb.instance.isPresent();
     if (present == _last) return;
     _last = present;
-    LogService.log('[DFU] bootloader ${present ? 'detected' : 'gone'}');
+    Log.info('[DFU] bootloader ${present ? 'detected' : 'gone'}');
     if (!_controller.isClosed) _controller.add(present);
   }
 

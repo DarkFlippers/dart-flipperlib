@@ -198,7 +198,7 @@ extension FlipperStorageApi on FlipperClient {
           priority: priority,
         );
       } catch (e) {
-        LogService.log('[StorageDu] list "$dir" failed: $e');
+        Log.error('[StorageDu] list "$dir" failed: $e');
         continue;
       }
       for (final response in batch.items) {
@@ -209,8 +209,8 @@ extension FlipperStorageApi on FlipperClient {
                 : '$dir/${entry.name}';
             queue.add(sub);
           } else {
-            if (LogService.enabled) {
-              LogService.log(
+            if (Log.debugOn) {
+              Log.debug(
                 '[StorageDu] file "$dir/${entry.name}" size=${entry.size}',
               );
             }
@@ -219,7 +219,7 @@ extension FlipperStorageApi on FlipperClient {
         }
       }
     }
-    LogService.log('[StorageDu] "$path" total=$total');
+    Log.info('[StorageDu] "$path" total=$total');
     return total;
   }
 
@@ -259,7 +259,7 @@ extension FlipperStorageApi on FlipperClient {
     final totalFrames = total == 0
         ? 1
         : ((total + rpcChunkSize - 1) ~/ rpcChunkSize);
-    LogService.log(
+    Log.info(
       '[Storage] write "$path": ${total}B, $totalFrames frames, '
       'rpcChunk=$rpcChunkSize',
     );
@@ -284,7 +284,7 @@ extension FlipperStorageApi on FlipperClient {
                 ..path = path
                 ..ensureFile().data = const <int>[];
               await sendFrame(Main(hasNext: false, storageWriteRequest: req));
-              LogService.log(
+              Log.info(
                 '[Storage] write "$path" cancelled after $frameIndex frames',
               );
               return;
@@ -318,7 +318,7 @@ extension FlipperStorageApi on FlipperClient {
               );
             }
           }
-          LogService.log('[Storage] $frameIndex frames sent, awaiting ACK');
+          Log.info('[Storage] $frameIndex frames sent, awaiting ACK');
         },
         timeout: timeout,
         priority: priority,
@@ -336,19 +336,19 @@ extension FlipperStorageApi on FlipperClient {
         throw FlipperWriteCancelledException(path);
       }
       if (!_isLinkDropError(e)) {
-        LogService.log('[Storage] write "$path" failed: $e');
+        Log.error('[Storage] write "$path" failed: $e');
         rethrow;
       }
       // The link dropped mid-upload and the firmware lost the partial file.
       // If the automatic reconnect restores the session, restart the upload
       // exactly once — the firmware opens the file with CREATE_ALWAYS, so a
       // restart from offset 0 is safe.
-      LogService.log('[Storage] write "$path" interrupted by link drop: $e');
+      Log.info('[Storage] write "$path" interrupted by link drop: $e');
       final restored = await _waitForRpcSession(const Duration(seconds: 30));
       if (!restored) {
         rethrow;
       }
-      LogService.log('[Storage] link restored, restarting write "$path"');
+      Log.info('[Storage] link restored, restarting write "$path"');
       cancelled = await upload();
     }
 
@@ -358,7 +358,7 @@ extension FlipperStorageApi on FlipperClient {
     }
 
     onProgress?.call(1.0);
-    LogService.log('[Storage] write "$path" complete');
+    Log.info('[Storage] write "$path" complete');
   }
 
   // Best-effort cleanup of an interrupted upload's partial file.
@@ -368,9 +368,9 @@ extension FlipperStorageApi on FlipperClient {
         DeleteRequest(path: path),
         priority: FlipperRequestPriority.rightNow,
       );
-      LogService.log('[Storage] partial file "$path" deleted');
+      Log.info('[Storage] partial file "$path" deleted');
     } catch (e) {
-      LogService.log('[Storage] cleanup of partial write "$path" failed: $e');
+      Log.error('[Storage] cleanup of partial write "$path" failed: $e');
     }
   }
 

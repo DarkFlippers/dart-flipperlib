@@ -3,7 +3,7 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 
-import '../../log_service.dart';
+import '../../log.dart';
 import 'usb_hotplug.dart';
 
 // udev netlink monitor for the "tty" subsystem, run on a background isolate
@@ -44,7 +44,7 @@ class LinuxHotplugWatcher implements UsbHotplugWatcher {
     try {
       _openUdev();
     } catch (e) {
-      LogService.log('[USB] Linux udev unavailable: $e');
+      Log.error('[USB] Linux udev unavailable: $e');
       return false;
     }
 
@@ -54,7 +54,7 @@ class LinuxHotplugWatcher implements UsbHotplugWatcher {
       if (msg is SendPort) {
         _control = msg;
       } else if (msg == 'error') {
-        LogService.log('[USB] Linux udev monitor failed to start');
+        Log.error('[USB] Linux udev monitor failed to start');
       } else {
         _onEvent?.call();
       }
@@ -63,7 +63,7 @@ class LinuxHotplugWatcher implements UsbHotplugWatcher {
     Isolate.spawn(_monitorEntry, recv.sendPort).then((iso) {
       _isolate = iso;
     }, onError: (Object e) {
-      LogService.log('[USB] Linux udev isolate spawn failed: $e');
+      Log.error('[USB] Linux udev isolate spawn failed: $e');
     });
     return true;
   }

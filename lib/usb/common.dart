@@ -45,10 +45,10 @@ class _DesktopUsbEvents {
     final watcher = createUsbHotplugWatcher();
     if (watcher != null && watcher.start(_emit)) {
       _watcher = watcher;
-      LogService.log('[USB] event-driven hotplug notifications armed');
+      Log.info('[USB] event-driven hotplug notifications armed');
       return;
     }
-    LogService.log('[USB] hotplug events unavailable; polling port list');
+    Log.error('[USB] hotplug events unavailable; polling port list');
     _lastPorts = _currentPorts();
     _timer = Timer.periodic(_pollInterval, (_) {
       final ports = _currentPorts();
@@ -138,7 +138,7 @@ abstract class _SerialUsbPlatformBase extends _UsbPlatform {
     try {
       return [for (final info in comports()) serialDevice(info)];
     } catch (e) {
-      LogService.log('[USB] comports enumeration failed: $e');
+      Log.error('[USB] comports enumeration failed: $e');
       return const [];
     }
   }
@@ -238,7 +238,7 @@ abstract class _SerialUsbTransportBase extends _Transport {
         pending.complete();
       }
     } else if (message is DesktopUsbFault) {
-      LogService.log('[FlipperClient] desktop USB fault: ${message.message}');
+      Log.error('[FlipperClient] desktop USB fault: ${message.message}');
       onTransportFault(StateError(message.message));
     } else if (message is DesktopUsbExited) {
       if (!_exited.isCompleted) _exited.complete();

@@ -14,7 +14,7 @@ import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
-import '../log_service.dart';
+import '../log.dart';
 import 'dfu_detector.dart';
 import 'dfuse_device.dart';
 import 'dfuse_file.dart';
@@ -180,7 +180,7 @@ void _recoveryIsolateEntry(_RecoveryConfig cfg) {
     _runRecovery(cfg.request, send);
     send(const RecoveryDone());
   } catch (e, st) {
-    LogService.log('[Recovery] failed: $e\n$st');
+    Log.error('[Recovery] failed: $e\n$st');
     send(RecoveryFailed(e.toString()));
   }
 }
@@ -511,7 +511,7 @@ _WirelessStatus _wirelessStatus() {
       return _WirelessStatus.invalid;
     }
     if (!dev.endTransaction()) return _WirelessStatus.invalid;
-    LogService.log('[Recovery] current FUS state: $state');
+    Log.error('[Recovery] current FUS state: $state');
     if (state.status == FusStatus.idle && state.error == FusError.noError) {
       return _WirelessStatus.fusRunning;
     } else if (state.status == FusStatus.errorOccured) {
@@ -572,19 +572,19 @@ void _waitForDfuCycle() {
 // releases the device reference. Retries acquisition because the device
 // re-enumerates after the resets earlier steps trigger.
 void _withDevice(String what, void Function(Stm32Wb55 dev) body) {
-  LogService.log('[Recovery] acquiring device for: $what');
+  Log.info('[Recovery] acquiring device for: $what');
   final address = _acquireDevice();
   final dev = Stm32Wb55(address);
   try {
     if (!dev.beginTransaction()) {
       throw StateError('$what: failed to open DFU device');
     }
-    LogService.log('[Recovery] transaction started: $what');
+    Log.info('[Recovery] transaction started: $what');
     try {
       body(dev);
     } finally {
       dev.endTransaction();
-      LogService.log('[Recovery] transaction ended: $what');
+      Log.info('[Recovery] transaction ended: $what');
     }
   } finally {
     DfuUsb.instance.releaseDevice(address);

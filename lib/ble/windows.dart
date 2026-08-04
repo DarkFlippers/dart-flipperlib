@@ -8,7 +8,7 @@ class _WindowsBlePlatform extends _UniversalBlePlatformBase {
     try {
       await uble.UniversalBle.requestPermissions();
     } catch (e) {
-      LogService.log(
+      Log.error(
         '[FlipperClient] Windows BLE permission request failed: $e',
       );
     }

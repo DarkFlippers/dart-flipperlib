@@ -8,7 +8,7 @@ class _IosBlePlatform extends _UniversalBlePlatformBase {
     try {
       await uble.UniversalBle.requestPermissions();
     } catch (e) {
-      LogService.log('[FlipperClient] iOS BLE permission request failed: $e');
+      Log.error('[FlipperClient] iOS BLE permission request failed: $e');
     }
   }
 
@@ -23,7 +23,7 @@ class _IosBlePlatform extends _UniversalBlePlatformBase {
           .where(includeDevice)
           .toList(growable: false);
     } catch (e) {
-      LogService.log('[FlipperClient] known BLE devices lookup failed: $e');
+      Log.error('[FlipperClient] known BLE devices lookup failed: $e');
       return const <BleDiscoveredDevice>[];
     }
   }

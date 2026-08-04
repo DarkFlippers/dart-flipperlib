@@ -40,8 +40,6 @@ class FlipperClient {
 
   Future<void> _lifecycleChain = Future.value();
   bool autoReconnect = true;
-  int _collectionGen = 0;
-  int _watchFreezeCount = 0;
 
   StreamSubscription<void>? _usbPresenceSub;
 
@@ -90,6 +88,13 @@ class FlipperClient {
 
   Stream<Map<String, String>> get deviceInfoStream =>
       _deviceInfoCompleteCtrl.stream;
+
+  /// Broadcast stream of device-info patches.
+  ///
+  /// Each event is a partial [Map<String, String>] — subscribers merge it into
+  /// their own state. Subscribing has no side-effects.
+  Stream<Map<String, String>> get deviceInfoUpdates =>
+      _deviceInfoWatchCtrl.stream;
 
   /// Snapshot stream of every held link (active and warm). Emits on connect,
   /// disconnect, activation swap and any session state change.
@@ -155,6 +160,12 @@ class FlipperClient {
 
   Map<String, String> get deviceInfoCache =>
       _active?.deviceInfoCache ?? const {};
+
+  bool get deviceInfoFetched => _active?._deviceInfoFetched ?? false;
+
+  void publishDeviceInfoPatch(Map<String, String> patch) {
+    _active?._publishDeviceInfoPatch(patch);
+  }
 
   Map<String, String> get deviceInfoWatchSnapshot =>
       _active?.deviceInfoWatchSnapshot ?? const {};
@@ -224,13 +235,13 @@ class FlipperClient {
 
     try {
       if (_scanBlocked) {
-        LogService.log('[BLE] scan skipped: a connection is in progress');
+        Log.info('[BLE] scan skipped: a connection is in progress');
         return;
       }
 
       final state = await uble.UniversalBle.getBluetoothAvailabilityState();
       if (state != uble.AvailabilityState.poweredOn) {
-        LogService.log('[FlipperClient] BLE adapter state: $state');
+        Log.info('[FlipperClient] BLE adapter state: $state');
         return;
       }
 
@@ -238,8 +249,8 @@ class FlipperClient {
 
       uble.UniversalBle.onScanResult = (device) {
         final discovered = BleDiscoveredDevice(device);
-        if (LogService.enabled) {
-          LogService.log(
+        if (Log.debugOn) {
+          Log.debug(
             '[BLE] scan result id=${discovered.id} name=${discovered.name} '
             'rssi=${discovered.rssi} services=${device.services}',
           );
@@ -251,7 +262,7 @@ class FlipperClient {
       // Single phase scanning every advertising device: Flipper identification
       // is name/service based (includeDevice), so the UI filter can also
       // reveal non-Flipper devices on demand.
-      LogService.log('[BLE] scan started');
+      Log.info('[BLE] scan started');
       await uble.UniversalBle.startScan();
       try {
         final interrupt = _scanPhaseInterrupt = Completer<void>();
@@ -282,7 +293,7 @@ class FlipperClient {
 
   void _armScanGrace() {
     if (_scanGraceTimer != null || _scanPhaseInterrupt == null) return;
-    LogService.log(
+    Log.info(
       '[BLE] Flipper found; scanning '
       '${_scanGraceWindow.inSeconds}s more for additional units',
     );
@@ -727,7 +738,7 @@ class FlipperClient {
     try {
       present = {for (final d in await _usbPlatform.loadDevices()) d.id};
     } catch (e) {
-      LogService.log('[FlipperClient] USB presence check failed: $e');
+      Log.error('[FlipperClient] USB presence check failed: $e');
       return;
     }
 
@@ -745,7 +756,7 @@ class FlipperClient {
         if (!identical(_sessions[_deviceKey(session.device)], session)) {
           continue;
         }
-        LogService.log(
+        Log.info(
           '[FlipperClient] USB ${session.device.id} removed; disconnecting',
         );
         final wasActive = identical(_active, session);

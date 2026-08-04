@@ -8,7 +8,7 @@ class _LinuxBlePlatform extends _UniversalBlePlatformBase {
     try {
       await uble.UniversalBle.requestPermissions();
     } catch (e) {
-      LogService.log('[FlipperClient] Linux BLE permission request failed: $e');
+      Log.error('[FlipperClient] Linux BLE permission request failed: $e');
     }
   }
 

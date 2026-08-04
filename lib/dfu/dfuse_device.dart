@@ -5,7 +5,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import '../log_service.dart';
+import '../log.dart';
 import 'dfu_memory_layout.dart';
 import 'dfuse_file.dart';
 import 'libusb/libusb.dart';
@@ -82,7 +82,7 @@ class DfuseDevice extends UsbDeviceBackend {
       final progress = (pageAddress - addr) * 100.0 / maxSize;
       onProgress?.call(DfuseOperation.erase, progress);
     }
-    LogService.log('[DFU] erase done');
+    Log.info('[DFU] erase done');
     return true;
   }
 
@@ -138,7 +138,7 @@ class DfuseDevice extends UsbDeviceBackend {
 
     final maxTransferSize = _maxTransferSize();
     if (maxTransferSize == null) return _fail('No functional DFU descriptor');
-    LogService.log('[DFU] device transfer size: $maxTransferSize');
+    Log.info('[DFU] device transfer size: $maxTransferSize');
 
     var totalSize = 0;
     var transaction = 2;
@@ -161,7 +161,7 @@ class DfuseDevice extends UsbDeviceBackend {
       transaction++;
       onProgress?.call(DfuseOperation.download, totalSize * 100.0 / data.length);
     }
-    LogService.log('[DFU] download finished');
+    Log.info('[DFU] download finished');
     return true;
   }
 
@@ -206,11 +206,11 @@ class DfuseDevice extends UsbDeviceBackend {
       transaction++;
       onProgress?.call(DfuseOperation.upload, totalSize * 100.0 / maxSize);
       if (buf.length < transferSize) {
-        LogService.log('[DFU] upload end of transmission');
+        Log.info('[DFU] upload end of transmission');
         break;
       }
     }
-    LogService.log('[DFU] upload finished');
+    Log.info('[DFU] upload finished');
     return out.toBytes();
   }
 
@@ -289,7 +289,7 @@ class DfuseDevice extends UsbDeviceBackend {
       statusLength,
     );
     if (buf.length != statusLength) {
-      LogService.log('[DFU] unable to get device status');
+      Log.info('[DFU] unable to get device status');
       return _DfuStatus.undefined;
     }
     final bwPollTimeout = buf[1] | (buf[2] << 8) | (buf[3] << 16);
@@ -299,10 +299,10 @@ class DfuseDevice extends UsbDeviceBackend {
   bool prepare() {
     final status = _getStatus();
     if (status.bStatus != _statusOk) {
-      LogService.log('[DFU] device in error state, resetting');
+      Log.error('[DFU] device in error state, resetting');
       if (!_clearStatus()) return _fail('Failed to clear device status');
     } else if (status.bState != _stateDfuIdle) {
-      LogService.log('[DFU] device not idle, resetting');
+      Log.error('[DFU] device not idle, resetting');
       if (!_abort()) return _fail('Failed to abort to idle');
     }
     return true;
@@ -319,7 +319,7 @@ class DfuseDevice extends UsbDeviceBackend {
   }
 
   bool _fail(String msg) {
-    LogService.log('[DFU] $msg');
+    Log.info('[DFU] $msg');
     return false;
   }
 

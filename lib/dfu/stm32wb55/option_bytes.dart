@@ -11,7 +11,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import '../../log_service.dart';
+import '../../log.dart';
 
 class _FieldSpec {
   const _FieldSpec(this.wordOffset, this.bitOffset, this.width, this.logical);
@@ -92,7 +92,7 @@ class OptionBytes {
   /// Parses the 128 bytes read from the device into NORMAL field values.
   factory OptionBytes.fromDeviceData(Uint8List data) {
     if (data.length != sizeBytes) {
-      LogService.log('[DFU] unexpected option-bytes size ${data.length}');
+      Log.error('[DFU] unexpected option-bytes size ${data.length}');
       return invalid();
     }
     final bd = ByteData.sublistView(data);
@@ -112,7 +112,7 @@ class OptionBytes {
       if (line.isEmpty) continue;
       final tokens = line.split(':');
       if (tokens.length != 3) {
-        LogService.log('[DFU] malformed option-bytes line: "$line"');
+        Log.error('[DFU] malformed option-bytes line: "$line"');
         return invalid();
       }
       final field = tokens[0].trim();
@@ -121,7 +121,7 @@ class OptionBytes {
         radix: 16,
       );
       if (value == null || !_specs.containsKey(field)) {
-        LogService.log('[DFU] illegal option-bytes field/value: "$line"');
+        Log.error('[DFU] illegal option-bytes field/value: "$line"');
         return invalid();
       }
       map[field] = value;
@@ -133,7 +133,7 @@ class OptionBytes {
 
   void setValue(String field, int v) {
     if (!_specs.containsKey(field)) {
-      LogService.log('[DFU] illegal option-bytes field: $field');
+      Log.info('[DFU] illegal option-bytes field: $field');
       return;
     }
     _data[field] = v;

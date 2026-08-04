@@ -111,7 +111,7 @@ class _FrameBuffer {
     _FrameBufferPendingState? pending;
     // Diagnostics only (hex preview + varint walk): never burn this on the
     // RX hot path in release builds.
-    if (LogService.enabled && _readPos < _writePos) {
+    if (Log.debugOn && _readPos < _writePos) {
       pending = _describePending();
     }
     return _FrameBufferPushResult(messages, pending);
@@ -181,7 +181,7 @@ class _FrameBuffer {
 
       if ((byte & 0x80) == 0) {
         if (length > 65536) {
-          LogService.log(
+          Log.error(
             '[FrameBuffer] bad varint length=$length '
             '(0x${_buf[_readPos].toRadixString(16)}), dropping first byte',
           );
@@ -195,7 +195,7 @@ class _FrameBuffer {
           // The firmware never sends an empty Main; a zero-length frame is
           // noise (e.g. a stray 0x00 after desync) and must count toward the
           // desync streak instead of resetting it with a fake empty message.
-          LogService.log('[FrameBuffer] empty frame, dropping first byte');
+          Log.error('[FrameBuffer] empty frame, dropping first byte');
           _readPos += 1;
           onParseError?.call(
             const FormatException('Zero-length protobuf frame'),
@@ -210,7 +210,7 @@ class _FrameBuffer {
         try {
           return Main.fromBuffer(payload);
         } catch (error) {
-          LogService.log(
+          Log.error(
             '[FrameBuffer] protobuf parse error (length=$length): $error',
           );
           onParseError?.call(error);
@@ -219,7 +219,7 @@ class _FrameBuffer {
       }
 
       if (shift >= 35) {
-        LogService.log(
+        Log.error(
           '[FrameBuffer] varint overflow, dropping first byte '
           '(0x${_buf[_readPos].toRadixString(16)})',
         );

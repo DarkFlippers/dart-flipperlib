@@ -9,7 +9,7 @@ import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 
-import '../log_service.dart';
+import '../log.dart';
 import 'libusb/libusb.dart';
 
 class UsbDeviceBackend {
@@ -41,7 +41,7 @@ class UsbDeviceBackend {
     try {
       final err = _usb.open(_device, out);
       if (err != libusbSuccess) {
-        LogService.log('[DFU] libusb_open failed: ${_usb.errorString(err)}');
+        Log.error('[DFU] libusb_open failed: ${_usb.errorString(err)}');
         return false;
       }
       _handle = out.value;
@@ -67,7 +67,7 @@ class UsbDeviceBackend {
   bool releaseInterface(int interfaceNum) {
     final err = _usb.releaseInterface(_handle, interfaceNum);
     if (err != libusbSuccess) {
-      LogService.log(
+      Log.error(
         '[DFU] releaseInterface failed: ${_usb.errorString(err)}',
       );
     }
@@ -107,7 +107,7 @@ class UsbDeviceBackend {
         sleep(const Duration(milliseconds: _retryIntervalMs));
       }
       if (res < 0) {
-        LogService.log(
+        Log.error(
           '[DFU] control OUT failed: ${_usb.errorString(res)}',
         );
       }
@@ -144,7 +144,7 @@ class UsbDeviceBackend {
         sleep(const Duration(milliseconds: _retryIntervalMs));
       }
       if (res < 0) {
-        LogService.log('[DFU] control IN failed: ${_usb.errorString(res)}');
+        Log.error('[DFU] control IN failed: ${_usb.errorString(res)}');
         return Uint8List(0);
       }
       return Uint8List.fromList(buf.asTypedList(res));
@@ -160,7 +160,7 @@ class UsbDeviceBackend {
     final cfgOut = malloc<Pointer<LibusbConfigDescriptor>>();
     try {
       if (_usb.getConfigDescriptor(_device, 0, cfgOut) != libusbSuccess) {
-        LogService.log('[DFU] getConfigDescriptor failed');
+        Log.error('[DFU] getConfigDescriptor failed');
         return Uint8List(0);
       }
       final cfg = cfgOut.value;
@@ -198,7 +198,7 @@ class UsbDeviceBackend {
         final descIndex = (intf.altsetting + alt).ref.iInterface;
         final res = _usb.getStringDescriptorAscii(_handle, descIndex, buf, 254);
         if (res < 0) {
-          LogService.log(
+          Log.error(
             '[DFU] string descriptor failed: ${_usb.errorString(res)}',
           );
           return '';
@@ -221,7 +221,7 @@ class UsbDeviceBackend {
       sleep(const Duration(milliseconds: _retryIntervalMs));
     }
     if (err != libusbSuccess) {
-      LogService.log('[DFU] $what failed: ${_usb.errorString(err)}');
+      Log.error('[DFU] $what failed: ${_usb.errorString(err)}');
     }
     return err == libusbSuccess;
   }
