@@ -21,6 +21,23 @@ class AndroidBlePlatform extends UniversalBlePlatformBase {
     }
   }
 
+  // No withServices filter: unlike iOS, Android resolves it from a service
+  // cache that is empty in a fresh process — exactly when this lookup matters.
+  // includeDevice filters by the Flipper MAC OUI / name instead.
+  @override
+  Future<List<BleDiscoveredDevice>> loadKnownDevices() async {
+    try {
+      final devices = await uble.UniversalBle.getSystemDevices();
+      return devices
+          .map(BleDiscoveredDevice.new)
+          .where(includeDevice)
+          .toList(growable: false);
+    } catch (e) {
+      Log.error('[FlipperClient] known BLE devices lookup failed: $e');
+      return const <BleDiscoveredDevice>[];
+    }
+  }
+
   @override
   Future<Transport> openTransport(BleDiscoveredDevice device) {
     return AndroidBleTransport.create(device);
