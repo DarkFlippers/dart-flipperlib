@@ -6,6 +6,8 @@
 Flipper Zero client for Flutter: BLE and USB links, the full protobuf RPC surface, CLI
 passthrough and STM32WB55 recovery.
 
+Built for [qUnleashed](https://github.com/DarkFlippers/qUnleashed), a Flipper Zero companion app.
+
 ## Features
 
 - **Multi-session** — several links held at once, exactly one active. `activate()` reroutes
