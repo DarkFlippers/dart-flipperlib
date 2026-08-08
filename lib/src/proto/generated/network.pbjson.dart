@@ -28,6 +28,24 @@ const Protocol$json = {
 final $typed_data.Uint8List protocolDescriptor =
     $convert.base64Decode('CghQcm90b2NvbBIHCgNUQ1AQABIHCgNVRFAQAQ==');
 
+@$core.Deprecated('Use httpMethodDescriptor instead')
+const HttpMethod$json = {
+  '1': 'HttpMethod',
+  '2': [
+    {'1': 'HTTP_GET', '2': 0},
+    {'1': 'HTTP_POST', '2': 1},
+    {'1': 'HTTP_PUT', '2': 2},
+    {'1': 'HTTP_PATCH', '2': 3},
+    {'1': 'HTTP_DELETE', '2': 4},
+    {'1': 'HTTP_HEAD', '2': 5},
+  ],
+};
+
+/// Descriptor for `HttpMethod`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List httpMethodDescriptor = $convert.base64Decode(
+    'CgpIdHRwTWV0aG9kEgwKCEhUVFBfR0VUEAASDQoJSFRUUF9QT1NUEAESDAoISFRUUF9QVVQQAh'
+    'IOCgpIVFRQX1BBVENIEAMSDwoLSFRUUF9ERUxFVEUQBBINCglIVFRQX0hFQUQQBQ==');
+
 @$core.Deprecated('Use connectionStateDescriptor instead')
 const ConnectionState$json = {
   '1': 'ConnectionState',
@@ -61,6 +79,9 @@ const ErrorCode$json = {
     {'1': 'MAX_CONNECTIONS', '2': 10},
     {'1': 'INVALID_PROTOCOL', '2': 11},
     {'1': 'INTERNAL_ERROR', '2': 12},
+    {'1': 'TLS_FAILED', '2': 13},
+    {'1': 'INVALID_URL', '2': 14},
+    {'1': 'FILE_ERROR', '2': 15},
   ],
 };
 
@@ -70,7 +91,8 @@ final $typed_data.Uint8List errorCodeDescriptor = $convert.base64Decode(
     '9OTkVDVElPTl9SRUZVU0VEEAMSFwoTTkVUV09SS19VTlJFQUNIQUJMRRAEEhQKEEhPU1RfVU5S'
     'RUFDSEFCTEUQBRIWChJJTlZBTElEX0NPTk5FQ1RJT04QBhIRCg1OT1RfQ09OTkVDVEVEEAcSDw'
     'oLU0VORF9GQUlMRUQQCBISCg5SRUNFSVZFX0ZBSUxFRBAJEhMKD01BWF9DT05ORUNUSU9OUxAK'
-    'EhQKEElOVkFMSURfUFJPVE9DT0wQCxISCg5JTlRFUk5BTF9FUlJPUhAM');
+    'EhQKEElOVkFMSURfUFJPVE9DT0wQCxISCg5JTlRFUk5BTF9FUlJPUhAMEg4KClRMU19GQUlMRU'
+    'QQDRIPCgtJTlZBTElEX1VSTBAOEg4KCkZJTEVfRVJST1IQDw==');
 
 @$core.Deprecated('Use connectRequestDescriptor instead')
 const ConnectRequest$json = {
@@ -136,13 +158,14 @@ const SendRequest$json = {
   '2': [
     {'1': 'connection_id', '3': 1, '4': 1, '5': 13, '10': 'connectionId'},
     {'1': 'data', '3': 2, '4': 1, '5': 12, '10': 'data'},
+    {'1': 'binary', '3': 3, '4': 1, '5': 8, '10': 'binary'},
   ],
 };
 
 /// Descriptor for `SendRequest`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List sendRequestDescriptor = $convert.base64Decode(
     'CgtTZW5kUmVxdWVzdBIjCg1jb25uZWN0aW9uX2lkGAEgASgNUgxjb25uZWN0aW9uSWQSEgoEZG'
-    'F0YRgCIAEoDFIEZGF0YQ==');
+    'F0YRgCIAEoDFIEZGF0YRIWCgZiaW5hcnkYAyABKAhSBmJpbmFyeQ==');
 
 @$core.Deprecated('Use sendResponseDescriptor instead')
 const SendResponse$json = {
@@ -173,13 +196,14 @@ const ReceiveData$json = {
   '2': [
     {'1': 'connection_id', '3': 1, '4': 1, '5': 13, '10': 'connectionId'},
     {'1': 'data', '3': 2, '4': 1, '5': 12, '10': 'data'},
+    {'1': 'binary', '3': 3, '4': 1, '5': 8, '10': 'binary'},
   ],
 };
 
 /// Descriptor for `ReceiveData`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List receiveDataDescriptor = $convert.base64Decode(
     'CgtSZWNlaXZlRGF0YRIjCg1jb25uZWN0aW9uX2lkGAEgASgNUgxjb25uZWN0aW9uSWQSEgoEZG'
-    'F0YRgCIAEoDFIEZGF0YQ==');
+    'F0YRgCIAEoDFIEZGF0YRIWCgZiaW5hcnkYAyABKAhSBmJpbmFyeQ==');
 
 @$core.Deprecated('Use closeRequestDescriptor instead')
 const CloseRequest$json = {
@@ -243,3 +267,79 @@ final $typed_data.Uint8List stateChangedDescriptor = $convert.base64Decode(
     'CgxTdGF0ZUNoYW5nZWQSIwoNY29ubmVjdGlvbl9pZBgBIAEoDVIMY29ubmVjdGlvbklkEjEKBX'
     'N0YXRlGAIgASgOMhsuUEJfTmV0d29yay5Db25uZWN0aW9uU3RhdGVSBXN0YXRlEisKBWVycm9y'
     'GAMgASgOMhUuUEJfTmV0d29yay5FcnJvckNvZGVSBWVycm9y');
+
+@$core.Deprecated('Use httpRequestDescriptor instead')
+const HttpRequest$json = {
+  '1': 'HttpRequest',
+  '2': [
+    {'1': 'request_id', '3': 1, '4': 1, '5': 13, '10': 'requestId'},
+    {
+      '1': 'method',
+      '3': 2,
+      '4': 1,
+      '5': 14,
+      '6': '.PB_Network.HttpMethod',
+      '10': 'method'
+    },
+    {'1': 'url', '3': 3, '4': 1, '5': 9, '10': 'url'},
+    {'1': 'headers', '3': 4, '4': 1, '5': 9, '10': 'headers'},
+    {'1': 'body', '3': 5, '4': 1, '5': 12, '10': 'body'},
+    {'1': 'send_path', '3': 6, '4': 1, '5': 9, '10': 'sendPath'},
+    {'1': 'save_path', '3': 7, '4': 1, '5': 9, '10': 'savePath'},
+    {'1': 'timeout_ms', '3': 8, '4': 1, '5': 13, '10': 'timeoutMs'},
+    {'1': 'include_headers', '3': 9, '4': 1, '5': 8, '10': 'includeHeaders'},
+  ],
+};
+
+/// Descriptor for `HttpRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List httpRequestDescriptor = $convert.base64Decode(
+    'CgtIdHRwUmVxdWVzdBIdCgpyZXF1ZXN0X2lkGAEgASgNUglyZXF1ZXN0SWQSLgoGbWV0aG9kGA'
+    'IgASgOMhYuUEJfTmV0d29yay5IdHRwTWV0aG9kUgZtZXRob2QSEAoDdXJsGAMgASgJUgN1cmwS'
+    'GAoHaGVhZGVycxgEIAEoCVIHaGVhZGVycxISCgRib2R5GAUgASgMUgRib2R5EhsKCXNlbmRfcG'
+    'F0aBgGIAEoCVIIc2VuZFBhdGgSGwoJc2F2ZV9wYXRoGAcgASgJUghzYXZlUGF0aBIdCgp0aW1l'
+    'b3V0X21zGAggASgNUgl0aW1lb3V0TXMSJwoPaW5jbHVkZV9oZWFkZXJzGAkgASgIUg5pbmNsdW'
+    'RlSGVhZGVycw==');
+
+@$core.Deprecated('Use httpResponseDescriptor instead')
+const HttpResponse$json = {
+  '1': 'HttpResponse',
+  '2': [
+    {'1': 'request_id', '3': 1, '4': 1, '5': 13, '10': 'requestId'},
+    {'1': 'status', '3': 2, '4': 1, '5': 13, '10': 'status'},
+    {
+      '1': 'error',
+      '3': 3,
+      '4': 1,
+      '5': 14,
+      '6': '.PB_Network.ErrorCode',
+      '10': 'error'
+    },
+    {'1': 'headers', '3': 4, '4': 1, '5': 9, '10': 'headers'},
+    {'1': 'body_size', '3': 5, '4': 1, '5': 13, '10': 'bodySize'},
+    {'1': 'saved_to_file', '3': 6, '4': 1, '5': 8, '10': 'savedToFile'},
+  ],
+};
+
+/// Descriptor for `HttpResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List httpResponseDescriptor = $convert.base64Decode(
+    'CgxIdHRwUmVzcG9uc2USHQoKcmVxdWVzdF9pZBgBIAEoDVIJcmVxdWVzdElkEhYKBnN0YXR1cx'
+    'gCIAEoDVIGc3RhdHVzEisKBWVycm9yGAMgASgOMhUuUEJfTmV0d29yay5FcnJvckNvZGVSBWVy'
+    'cm9yEhgKB2hlYWRlcnMYBCABKAlSB2hlYWRlcnMSGwoJYm9keV9zaXplGAUgASgNUghib2R5U2'
+    'l6ZRIiCg1zYXZlZF90b19maWxlGAYgASgIUgtzYXZlZFRvRmlsZQ==');
+
+@$core.Deprecated('Use webSocketOpenRequestDescriptor instead')
+const WebSocketOpenRequest$json = {
+  '1': 'WebSocketOpenRequest',
+  '2': [
+    {'1': 'connection_id', '3': 1, '4': 1, '5': 13, '10': 'connectionId'},
+    {'1': 'url', '3': 2, '4': 1, '5': 9, '10': 'url'},
+    {'1': 'headers', '3': 3, '4': 1, '5': 9, '10': 'headers'},
+    {'1': 'timeout_ms', '3': 4, '4': 1, '5': 13, '10': 'timeoutMs'},
+  ],
+};
+
+/// Descriptor for `WebSocketOpenRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List webSocketOpenRequestDescriptor = $convert.base64Decode(
+    'ChRXZWJTb2NrZXRPcGVuUmVxdWVzdBIjCg1jb25uZWN0aW9uX2lkGAEgASgNUgxjb25uZWN0aW'
+    '9uSWQSEAoDdXJsGAIgASgJUgN1cmwSGAoHaGVhZGVycxgDIAEoCVIHaGVhZGVycxIdCgp0aW1l'
+    'b3V0X21zGAQgASgNUgl0aW1lb3V0TXM=');

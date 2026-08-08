@@ -857,6 +857,33 @@ const Main$json = {
       '9': 0,
       '10': 'gpsLocation'
     },
+    {
+      '1': 'network_http_request',
+      '3': 88,
+      '4': 1,
+      '5': 11,
+      '6': '.PB_Network.HttpRequest',
+      '9': 0,
+      '10': 'networkHttpRequest'
+    },
+    {
+      '1': 'network_http_response',
+      '3': 89,
+      '4': 1,
+      '5': 11,
+      '6': '.PB_Network.HttpResponse',
+      '9': 0,
+      '10': 'networkHttpResponse'
+    },
+    {
+      '1': 'network_websocket_open_request',
+      '3': 90,
+      '4': 1,
+      '5': 11,
+      '6': '.PB_Network.WebSocketOpenRequest',
+      '9': 0,
+      '10': 'networkWebsocketOpenRequest'
+    },
   ],
   '8': [
     {'1': 'content'},
@@ -994,8 +1021,12 @@ final $typed_data.Uint8List mainDescriptor = $convert.base64Decode(
     'ZXN0ElIKF2dwc19zdHJlYW1fc3RvcF9yZXF1ZXN0GFUgASgLMhkuUEJfR3BzLlN0cmVhbVN0b3'
     'BSZXF1ZXN0SABSFGdwc1N0cmVhbVN0b3BSZXF1ZXN0EksKFGdwc19sb2NhdGlvbl9yZXF1ZXN0'
     'GFYgASgLMhcuUEJfR3BzLkxvY2F0aW9uUmVxdWVzdEgAUhJncHNMb2NhdGlvblJlcXVlc3QSNQ'
-    'oMZ3BzX2xvY2F0aW9uGFcgASgLMhAuUEJfR3BzLkxvY2F0aW9uSABSC2dwc0xvY2F0aW9uQgkK'
-    'B2NvbnRlbnQ=');
+    'oMZ3BzX2xvY2F0aW9uGFcgASgLMhAuUEJfR3BzLkxvY2F0aW9uSABSC2dwc0xvY2F0aW9uEksK'
+    'FG5ldHdvcmtfaHR0cF9yZXF1ZXN0GFggASgLMhcuUEJfTmV0d29yay5IdHRwUmVxdWVzdEgAUh'
+    'JuZXR3b3JrSHR0cFJlcXVlc3QSTgoVbmV0d29ya19odHRwX3Jlc3BvbnNlGFkgASgLMhguUEJf'
+    'TmV0d29yay5IdHRwUmVzcG9uc2VIAFITbmV0d29ya0h0dHBSZXNwb25zZRJnCh5uZXR3b3JrX3'
+    'dlYnNvY2tldF9vcGVuX3JlcXVlc3QYWiABKAsyIC5QQl9OZXR3b3JrLldlYlNvY2tldE9wZW5S'
+    'ZXF1ZXN0SABSG25ldHdvcmtXZWJzb2NrZXRPcGVuUmVxdWVzdEIJCgdjb250ZW50');
 
 @$core.Deprecated('Use regionDescriptor instead')
 const Region$json = {

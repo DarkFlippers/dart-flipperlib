@@ -31,6 +31,37 @@ class Protocol extends $pb.ProtobufEnum {
   const Protocol._(super.value, super.name);
 }
 
+class HttpMethod extends $pb.ProtobufEnum {
+  static const HttpMethod HTTP_GET =
+      HttpMethod._(0, _omitEnumNames ? '' : 'HTTP_GET');
+  static const HttpMethod HTTP_POST =
+      HttpMethod._(1, _omitEnumNames ? '' : 'HTTP_POST');
+  static const HttpMethod HTTP_PUT =
+      HttpMethod._(2, _omitEnumNames ? '' : 'HTTP_PUT');
+  static const HttpMethod HTTP_PATCH =
+      HttpMethod._(3, _omitEnumNames ? '' : 'HTTP_PATCH');
+  static const HttpMethod HTTP_DELETE =
+      HttpMethod._(4, _omitEnumNames ? '' : 'HTTP_DELETE');
+  static const HttpMethod HTTP_HEAD =
+      HttpMethod._(5, _omitEnumNames ? '' : 'HTTP_HEAD');
+
+  static const $core.List<HttpMethod> values = <HttpMethod>[
+    HTTP_GET,
+    HTTP_POST,
+    HTTP_PUT,
+    HTTP_PATCH,
+    HTTP_DELETE,
+    HTTP_HEAD,
+  ];
+
+  static final $core.List<HttpMethod?> _byValue =
+      $pb.ProtobufEnum.$_initByValueList(values, 5);
+  static HttpMethod? valueOf($core.int value) =>
+      value < 0 || value >= _byValue.length ? null : _byValue[value];
+
+  const HttpMethod._(super.value, super.name);
+}
+
 class ConnectionState extends $pb.ProtobufEnum {
   static const ConnectionState DISCONNECTED =
       ConnectionState._(0, _omitEnumNames ? '' : 'DISCONNECTED');
@@ -82,6 +113,12 @@ class ErrorCode extends $pb.ProtobufEnum {
       ErrorCode._(11, _omitEnumNames ? '' : 'INVALID_PROTOCOL');
   static const ErrorCode INTERNAL_ERROR =
       ErrorCode._(12, _omitEnumNames ? '' : 'INTERNAL_ERROR');
+  static const ErrorCode TLS_FAILED =
+      ErrorCode._(13, _omitEnumNames ? '' : 'TLS_FAILED');
+  static const ErrorCode INVALID_URL =
+      ErrorCode._(14, _omitEnumNames ? '' : 'INVALID_URL');
+  static const ErrorCode FILE_ERROR =
+      ErrorCode._(15, _omitEnumNames ? '' : 'FILE_ERROR');
 
   static const $core.List<ErrorCode> values = <ErrorCode>[
     NONE,
@@ -97,10 +134,13 @@ class ErrorCode extends $pb.ProtobufEnum {
     MAX_CONNECTIONS,
     INVALID_PROTOCOL,
     INTERNAL_ERROR,
+    TLS_FAILED,
+    INVALID_URL,
+    FILE_ERROR,
   ];
 
   static final $core.List<ErrorCode?> _byValue =
-      $pb.ProtobufEnum.$_initByValueList(values, 12);
+      $pb.ProtobufEnum.$_initByValueList(values, 15);
   static ErrorCode? valueOf($core.int value) =>
       value < 0 || value >= _byValue.length ? null : _byValue[value];
 

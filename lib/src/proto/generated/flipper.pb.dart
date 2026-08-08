@@ -192,6 +192,9 @@ enum Main_Content {
   gpsStreamStopRequest,
   gpsLocationRequest,
   gpsLocation,
+  networkHttpRequest,
+  networkHttpResponse,
+  networkWebsocketOpenRequest,
   notSet
 }
 
@@ -284,6 +287,9 @@ class Main extends $pb.GeneratedMessage {
     $8.StreamStopRequest? gpsStreamStopRequest,
     $8.LocationRequest? gpsLocationRequest,
     $8.Location? gpsLocation,
+    $7.HttpRequest? networkHttpRequest,
+    $7.HttpResponse? networkHttpResponse,
+    $7.WebSocketOpenRequest? networkWebsocketOpenRequest,
   }) {
     final result = create();
     if (commandId != null) result.commandId = commandId;
@@ -442,6 +448,12 @@ class Main extends $pb.GeneratedMessage {
     if (gpsLocationRequest != null)
       result.gpsLocationRequest = gpsLocationRequest;
     if (gpsLocation != null) result.gpsLocation = gpsLocation;
+    if (networkHttpRequest != null)
+      result.networkHttpRequest = networkHttpRequest;
+    if (networkHttpResponse != null)
+      result.networkHttpResponse = networkHttpResponse;
+    if (networkWebsocketOpenRequest != null)
+      result.networkWebsocketOpenRequest = networkWebsocketOpenRequest;
     return result;
   }
 
@@ -539,6 +551,9 @@ class Main extends $pb.GeneratedMessage {
     85: Main_Content.gpsStreamStopRequest,
     86: Main_Content.gpsLocationRequest,
     87: Main_Content.gpsLocation,
+    88: Main_Content.networkHttpRequest,
+    89: Main_Content.networkHttpResponse,
+    90: Main_Content.networkWebsocketOpenRequest,
     0: Main_Content.notSet
   };
   static final $pb.BuilderInfo _i = $pb.BuilderInfo(
@@ -629,7 +644,10 @@ class Main extends $pb.GeneratedMessage {
       84,
       85,
       86,
-      87
+      87,
+      88,
+      89,
+      90
     ])
     ..aI(1, _omitFieldNames ? '' : 'commandId', fieldType: $pb.PbFieldType.OU3)
     ..aE<CommandStatus>(2, _omitFieldNames ? '' : 'commandStatus',
@@ -838,6 +856,13 @@ class Main extends $pb.GeneratedMessage {
         subBuilder: $8.LocationRequest.create)
     ..aOM<$8.Location>(87, _omitFieldNames ? '' : 'gpsLocation',
         subBuilder: $8.Location.create)
+    ..aOM<$7.HttpRequest>(88, _omitFieldNames ? '' : 'networkHttpRequest',
+        subBuilder: $7.HttpRequest.create)
+    ..aOM<$7.HttpResponse>(89, _omitFieldNames ? '' : 'networkHttpResponse',
+        subBuilder: $7.HttpResponse.create)
+    ..aOM<$7.WebSocketOpenRequest>(
+        90, _omitFieldNames ? '' : 'networkWebsocketOpenRequest',
+        subBuilder: $7.WebSocketOpenRequest.create)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -942,6 +967,9 @@ class Main extends $pb.GeneratedMessage {
   @$pb.TagNumber(85)
   @$pb.TagNumber(86)
   @$pb.TagNumber(87)
+  @$pb.TagNumber(88)
+  @$pb.TagNumber(89)
+  @$pb.TagNumber(90)
   Main_Content whichContent() => _Main_ContentByTag[$_whichOneof(0)]!;
   @$pb.TagNumber(4)
   @$pb.TagNumber(5)
@@ -1027,6 +1055,9 @@ class Main extends $pb.GeneratedMessage {
   @$pb.TagNumber(85)
   @$pb.TagNumber(86)
   @$pb.TagNumber(87)
+  @$pb.TagNumber(88)
+  @$pb.TagNumber(89)
+  @$pb.TagNumber(90)
   void clearContent() => $_clearField($_whichOneof(0));
 
   @$pb.TagNumber(1)
@@ -2021,6 +2052,40 @@ class Main extends $pb.GeneratedMessage {
   void clearGpsLocation() => $_clearField(87);
   @$pb.TagNumber(87)
   $8.Location ensureGpsLocation() => $_ensure(86);
+
+  @$pb.TagNumber(88)
+  $7.HttpRequest get networkHttpRequest => $_getN(87);
+  @$pb.TagNumber(88)
+  set networkHttpRequest($7.HttpRequest value) => $_setField(88, value);
+  @$pb.TagNumber(88)
+  $core.bool hasNetworkHttpRequest() => $_has(87);
+  @$pb.TagNumber(88)
+  void clearNetworkHttpRequest() => $_clearField(88);
+  @$pb.TagNumber(88)
+  $7.HttpRequest ensureNetworkHttpRequest() => $_ensure(87);
+
+  @$pb.TagNumber(89)
+  $7.HttpResponse get networkHttpResponse => $_getN(88);
+  @$pb.TagNumber(89)
+  set networkHttpResponse($7.HttpResponse value) => $_setField(89, value);
+  @$pb.TagNumber(89)
+  $core.bool hasNetworkHttpResponse() => $_has(88);
+  @$pb.TagNumber(89)
+  void clearNetworkHttpResponse() => $_clearField(89);
+  @$pb.TagNumber(89)
+  $7.HttpResponse ensureNetworkHttpResponse() => $_ensure(88);
+
+  @$pb.TagNumber(90)
+  $7.WebSocketOpenRequest get networkWebsocketOpenRequest => $_getN(89);
+  @$pb.TagNumber(90)
+  set networkWebsocketOpenRequest($7.WebSocketOpenRequest value) =>
+      $_setField(90, value);
+  @$pb.TagNumber(90)
+  $core.bool hasNetworkWebsocketOpenRequest() => $_has(89);
+  @$pb.TagNumber(90)
+  void clearNetworkWebsocketOpenRequest() => $_clearField(90);
+  @$pb.TagNumber(90)
+  $7.WebSocketOpenRequest ensureNetworkWebsocketOpenRequest() => $_ensure(89);
 }
 
 class Region_Band extends $pb.GeneratedMessage {
