@@ -1,6 +1,5 @@
 import 'dart:async';
 
-
 import '../../../protobuf.dart';
 import '../../model/device.dart';
 import '../../model/enums.dart';
@@ -38,8 +37,9 @@ extension FlipperGpioApi on FlipperClient {
   }) {
     return callRpc(
       Main(gpioGetPinMode: request),
-      (frame) =>
-          frame.hasGpioGetPinModeResponse() ? frame.gpioGetPinModeResponse : null,
+      (frame) => frame.hasGpioGetPinModeResponse()
+          ? frame.gpioGetPinModeResponse
+          : null,
       timeout: timeout,
       priority: priority,
     );
@@ -77,8 +77,9 @@ extension FlipperGpioApi on FlipperClient {
   }) {
     return callRpc(
       Main(gpioGetOtgMode: GetOtgMode()),
-      (frame) =>
-          frame.hasGpioGetOtgModeResponse() ? frame.gpioGetOtgModeResponse : null,
+      (frame) => frame.hasGpioGetOtgModeResponse()
+          ? frame.gpioGetOtgModeResponse
+          : null,
       timeout: timeout,
       priority: priority,
     );

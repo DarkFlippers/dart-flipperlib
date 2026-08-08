@@ -15,9 +15,13 @@ enum DfuseOperation { erase, download, upload }
 
 // bmRequestType for class/interface requests.
 const int _requestOut =
-    libusbEndpointOut | libusbRequestTypeClass | libusbRecipientInterface; // 0x21
+    libusbEndpointOut |
+    libusbRequestTypeClass |
+    libusbRecipientInterface; // 0x21
 const int _requestIn =
-    libusbEndpointIn | libusbRequestTypeClass | libusbRecipientInterface; // 0xA1
+    libusbEndpointIn |
+    libusbRequestTypeClass |
+    libusbRecipientInterface; // 0xA1
 
 // DFU class requests.
 const int _dfuDnload = 1;
@@ -159,7 +163,10 @@ class DfuseDevice extends UsbDeviceBackend {
 
       totalSize += buf.length;
       transaction++;
-      onProgress?.call(DfuseOperation.download, totalSize * 100.0 / data.length);
+      onProgress?.call(
+        DfuseOperation.download,
+        totalSize * 100.0 / data.length,
+      );
     }
     Log.info('[DFU] download finished');
     return true;

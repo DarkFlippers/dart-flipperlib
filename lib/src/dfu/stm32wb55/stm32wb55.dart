@@ -26,19 +26,28 @@ const int _sram2aBase = 0x20030000;
 const int _ditFusMagic = 0x0a94656b;
 
 class WbVersionInfo {
-  const WbVersionInfo({required this.fusVersion, required this.wirelessVersion});
+  const WbVersionInfo({
+    required this.fusVersion,
+    required this.wirelessVersion,
+  });
   final String fusVersion;
   final String wirelessVersion;
 
-  static const WbVersionInfo unknown =
-      WbVersionInfo(fusVersion: '0.0.0', wirelessVersion: '0.0.0');
+  static const WbVersionInfo unknown = WbVersionInfo(
+    fusVersion: '0.0.0',
+    wirelessVersion: '0.0.0',
+  );
 }
 
 class Stm32Wb55 extends DfuseDevice {
   Stm32Wb55(super.deviceAddress);
 
   OptionBytes optionBytes() {
-    final data = upload(_optionBytesAddr, OptionBytes.sizeBytes, WbPartition.optionBytes);
+    final data = upload(
+      _optionBytesAddr,
+      OptionBytes.sizeBytes,
+      WbPartition.optionBytes,
+    );
     if (data.length != OptionBytes.sizeBytes) {
       Log.error('[DFU] failed to read option bytes');
       return OptionBytes.invalid();

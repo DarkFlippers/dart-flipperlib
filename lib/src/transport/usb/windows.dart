@@ -30,9 +30,7 @@ class WindowsUsbTransport extends SerialUsbTransportBase {
     super.commandPort,
   );
 
-  static Future<WindowsUsbTransport> create(
-    DesktopUsbDiscoveredDevice device,
-  ) {
+  static Future<WindowsUsbTransport> create(DesktopUsbDiscoveredDevice device) {
     return SerialUsbTransportBase.createFor(device, WindowsUsbTransport._);
   }
 }

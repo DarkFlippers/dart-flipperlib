@@ -1,6 +1,5 @@
 import 'dart:async';
 
-
 import '../../model/device.dart';
 import '../client.dart';
 

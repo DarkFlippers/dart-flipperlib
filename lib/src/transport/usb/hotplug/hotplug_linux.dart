@@ -60,11 +60,14 @@ class LinuxHotplugWatcher implements UsbHotplugWatcher {
       }
     });
 
-    Isolate.spawn(_monitorEntry, recv.sendPort).then((iso) {
-      _isolate = iso;
-    }, onError: (Object e) {
-      Log.error('[USB] Linux udev isolate spawn failed: $e');
-    });
+    Isolate.spawn(_monitorEntry, recv.sendPort).then(
+      (iso) {
+        _isolate = iso;
+      },
+      onError: (Object e) {
+        Log.error('[USB] Linux udev isolate spawn failed: $e');
+      },
+    );
     return true;
   }
 
@@ -94,36 +97,55 @@ Future<void> _monitorEntry(SendPort mainSend) async {
   final udevLib = _openUdev();
   final libc = DynamicLibrary.process();
 
-  final udevNew = udevLib.lookupFunction<Pointer<Void> Function(),
-      Pointer<Void> Function()>('udev_new');
-  final monitorNew = udevLib.lookupFunction<
-      Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>),
-      Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>)>(
-      'udev_monitor_new_from_netlink');
-  final filterAdd = udevLib.lookupFunction<
-      Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>),
-      int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>)>(
-      'udev_monitor_filter_add_match_subsystem_devtype');
-  final enableReceiving = udevLib.lookupFunction<
-      Int32 Function(Pointer<Void>),
-      int Function(Pointer<Void>)>('udev_monitor_enable_receiving');
-  final getFd = udevLib.lookupFunction<Int32 Function(Pointer<Void>),
-      int Function(Pointer<Void>)>('udev_monitor_get_fd');
-  final receiveDevice = udevLib.lookupFunction<
-      Pointer<Void> Function(Pointer<Void>),
-      Pointer<Void> Function(Pointer<Void>)>('udev_monitor_receive_device');
-  final deviceUnref = udevLib.lookupFunction<
-      Pointer<Void> Function(Pointer<Void>),
-      Pointer<Void> Function(Pointer<Void>)>('udev_device_unref');
-  final monitorUnref = udevLib.lookupFunction<
-      Pointer<Void> Function(Pointer<Void>),
-      Pointer<Void> Function(Pointer<Void>)>('udev_monitor_unref');
-  final udevUnref = udevLib.lookupFunction<
-      Pointer<Void> Function(Pointer<Void>),
-      Pointer<Void> Function(Pointer<Void>)>('udev_unref');
-  final poll = libc.lookupFunction<
-      Int32 Function(Pointer<_Pollfd>, Uint64, Int32),
-      int Function(Pointer<_Pollfd>, int, int)>('poll');
+  final udevNew = udevLib
+      .lookupFunction<Pointer<Void> Function(), Pointer<Void> Function()>(
+        'udev_new',
+      );
+  final monitorNew = udevLib
+      .lookupFunction<
+        Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>),
+        Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>)
+      >('udev_monitor_new_from_netlink');
+  final filterAdd = udevLib
+      .lookupFunction<
+        Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>),
+        int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Utf8>)
+      >('udev_monitor_filter_add_match_subsystem_devtype');
+  final enableReceiving = udevLib
+      .lookupFunction<
+        Int32 Function(Pointer<Void>),
+        int Function(Pointer<Void>)
+      >('udev_monitor_enable_receiving');
+  final getFd = udevLib
+      .lookupFunction<
+        Int32 Function(Pointer<Void>),
+        int Function(Pointer<Void>)
+      >('udev_monitor_get_fd');
+  final receiveDevice = udevLib
+      .lookupFunction<
+        Pointer<Void> Function(Pointer<Void>),
+        Pointer<Void> Function(Pointer<Void>)
+      >('udev_monitor_receive_device');
+  final deviceUnref = udevLib
+      .lookupFunction<
+        Pointer<Void> Function(Pointer<Void>),
+        Pointer<Void> Function(Pointer<Void>)
+      >('udev_device_unref');
+  final monitorUnref = udevLib
+      .lookupFunction<
+        Pointer<Void> Function(Pointer<Void>),
+        Pointer<Void> Function(Pointer<Void>)
+      >('udev_monitor_unref');
+  final udevUnref = udevLib
+      .lookupFunction<
+        Pointer<Void> Function(Pointer<Void>),
+        Pointer<Void> Function(Pointer<Void>)
+      >('udev_unref');
+  final poll = libc
+      .lookupFunction<
+        Int32 Function(Pointer<_Pollfd>, Uint64, Int32),
+        int Function(Pointer<_Pollfd>, int, int)
+      >('poll');
 
   final udev = udevNew();
   if (udev == nullptr) {

@@ -36,8 +36,7 @@ class FlipperSession {
   final errorCtrl = StreamController<FlipperRpcException>.broadcast();
   final deviceInfoCompleteCtrl =
       StreamController<Map<String, String>>.broadcast();
-  final deviceInfoWatchCtrl =
-      StreamController<Map<String, String>>.broadcast();
+  final deviceInfoWatchCtrl = StreamController<Map<String, String>>.broadcast();
   final storageMutationCtrl = StreamController<void>.broadcast();
 
   final Map<int, PendingRpc> _pendingRpc = {};
@@ -288,11 +287,7 @@ class FlipperSession {
     _failStartedRequests(
       reason is Exception ? reason : StateError('Disconnected: $reason'),
     );
-    _setMode(
-      FlipperMode.disconnected,
-      closeReason: reason,
-      reconnecting: true,
-    );
+    _setMode(FlipperMode.disconnected, closeReason: reason, reconnecting: true);
     _signalWorker();
 
     if (sub != null) await sub.cancel();
@@ -943,9 +938,7 @@ class FlipperSession {
         continue;
       }
       if (Log.debugOn) {
-        Log.debug(
-          '[RPC] tx ok ${request.describe()} bytes=${encoded.length}',
-        );
+        Log.debug('[RPC] tx ok ${request.describe()} bytes=${encoded.length}');
       }
 
       if (frame.commandId != 0 && frame.hasNext) {
@@ -1039,9 +1032,7 @@ class FlipperSession {
     if (commandId == 0) {
       if (Log.debugOn) {
         // Broadcasts arrive at screen-streaming frame rate; keep this cheap.
-        Log.debug(
-          '[RPC] rx broadcast content=${frame.whichContent().name}',
-        );
+        Log.debug('[RPC] rx broadcast content=${frame.whichContent().name}');
       }
       final error = exceptionFromResponse(frame);
       if (error != null && !errorCtrl.isClosed) {
@@ -1234,11 +1225,7 @@ class FlipperSession {
     _announcedConnecting = false;
     if (connectionCtrl.isClosed) return;
     connectionCtrl.add(
-      FlipperConnectionState(
-        mode: mode,
-        device: null,
-        connected: false,
-      ),
+      FlipperConnectionState(mode: mode, device: null, connected: false),
     );
   }
 

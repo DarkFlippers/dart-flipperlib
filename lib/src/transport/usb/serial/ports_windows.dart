@@ -43,61 +43,121 @@ final DynamicLibrary _advapi32 = DynamicLibrary.open('advapi32.dll');
 final DynamicLibrary _cfgmgr32 = DynamicLibrary.open('cfgmgr32.dll');
 final DynamicLibrary _kernel32 = DynamicLibrary.open('kernel32.dll');
 
-final _setupDiDestroyDeviceInfoList = _setupapi.lookupFunction<
-    Int32 Function(IntPtr),
-    int Function(int)>('SetupDiDestroyDeviceInfoList');
+final _setupDiDestroyDeviceInfoList = _setupapi
+    .lookupFunction<Int32 Function(IntPtr), int Function(int)>(
+      'SetupDiDestroyDeviceInfoList',
+    );
 
-final _setupDiClassGuidsFromName = _setupapi.lookupFunction<
-    Int32 Function(Pointer<Utf16>, Pointer<_Guid>, Uint32, Pointer<Uint32>),
-    int Function(Pointer<Utf16>, Pointer<_Guid>, int,
-        Pointer<Uint32>)>('SetupDiClassGuidsFromNameW');
+final _setupDiClassGuidsFromName = _setupapi
+    .lookupFunction<
+      Int32 Function(Pointer<Utf16>, Pointer<_Guid>, Uint32, Pointer<Uint32>),
+      int Function(Pointer<Utf16>, Pointer<_Guid>, int, Pointer<Uint32>)
+    >('SetupDiClassGuidsFromNameW');
 
-final _setupDiEnumDeviceInfo = _setupapi.lookupFunction<
-    Int32 Function(IntPtr, Uint32, Pointer<_SpDevinfoData>),
-    int Function(int, int, Pointer<_SpDevinfoData>)>('SetupDiEnumDeviceInfo');
+final _setupDiEnumDeviceInfo = _setupapi
+    .lookupFunction<
+      Int32 Function(IntPtr, Uint32, Pointer<_SpDevinfoData>),
+      int Function(int, int, Pointer<_SpDevinfoData>)
+    >('SetupDiEnumDeviceInfo');
 
-final _setupDiGetClassDevs = _setupapi.lookupFunction<
-    IntPtr Function(Pointer<_Guid>, Pointer<Utf16>, IntPtr, Uint32),
-    int Function(
-        Pointer<_Guid>, Pointer<Utf16>, int, int)>('SetupDiGetClassDevsW');
+final _setupDiGetClassDevs = _setupapi
+    .lookupFunction<
+      IntPtr Function(Pointer<_Guid>, Pointer<Utf16>, IntPtr, Uint32),
+      int Function(Pointer<_Guid>, Pointer<Utf16>, int, int)
+    >('SetupDiGetClassDevsW');
 
-final _setupDiGetDeviceRegistryProperty = _setupapi.lookupFunction<
-    Int32 Function(IntPtr, Pointer<_SpDevinfoData>, Uint32, Pointer<Uint32>,
-        Pointer<Void>, Uint32, Pointer<Uint32>),
-    int Function(int, Pointer<_SpDevinfoData>, int, Pointer<Uint32>,
-        Pointer<Void>, int, Pointer<Uint32>)>('SetupDiGetDeviceRegistryPropertyW');
+final _setupDiGetDeviceRegistryProperty = _setupapi
+    .lookupFunction<
+      Int32 Function(
+        IntPtr,
+        Pointer<_SpDevinfoData>,
+        Uint32,
+        Pointer<Uint32>,
+        Pointer<Void>,
+        Uint32,
+        Pointer<Uint32>,
+      ),
+      int Function(
+        int,
+        Pointer<_SpDevinfoData>,
+        int,
+        Pointer<Uint32>,
+        Pointer<Void>,
+        int,
+        Pointer<Uint32>,
+      )
+    >('SetupDiGetDeviceRegistryPropertyW');
 
-final _setupDiGetDeviceInstanceId = _setupapi.lookupFunction<
-    Int32 Function(
-        IntPtr, Pointer<_SpDevinfoData>, Pointer<Utf16>, Uint32, Pointer<Uint32>),
-    int Function(int, Pointer<_SpDevinfoData>, Pointer<Utf16>, int,
-        Pointer<Uint32>)>('SetupDiGetDeviceInstanceIdW');
+final _setupDiGetDeviceInstanceId = _setupapi
+    .lookupFunction<
+      Int32 Function(
+        IntPtr,
+        Pointer<_SpDevinfoData>,
+        Pointer<Utf16>,
+        Uint32,
+        Pointer<Uint32>,
+      ),
+      int Function(
+        int,
+        Pointer<_SpDevinfoData>,
+        Pointer<Utf16>,
+        int,
+        Pointer<Uint32>,
+      )
+    >('SetupDiGetDeviceInstanceIdW');
 
-final _setupDiOpenDevRegKey = _setupapi.lookupFunction<
-    IntPtr Function(IntPtr, Pointer<_SpDevinfoData>, Uint32, Uint32, Uint32, Uint32),
-    int Function(
-        int, Pointer<_SpDevinfoData>, int, int, int, int)>('SetupDiOpenDevRegKey');
+final _setupDiOpenDevRegKey = _setupapi
+    .lookupFunction<
+      IntPtr Function(
+        IntPtr,
+        Pointer<_SpDevinfoData>,
+        Uint32,
+        Uint32,
+        Uint32,
+        Uint32,
+      ),
+      int Function(int, Pointer<_SpDevinfoData>, int, int, int, int)
+    >('SetupDiOpenDevRegKey');
 
 final _regCloseKey = _advapi32
     .lookupFunction<Int32 Function(IntPtr), int Function(int)>('RegCloseKey');
 
-final _regQueryValueEx = _advapi32.lookupFunction<
-    Int32 Function(IntPtr, Pointer<Utf16>, Pointer<Uint32>, Pointer<Uint32>,
-        Pointer<Void>, Pointer<Uint32>),
-    int Function(int, Pointer<Utf16>, Pointer<Uint32>, Pointer<Uint32>,
-        Pointer<Void>, Pointer<Uint32>)>('RegQueryValueExW');
+final _regQueryValueEx = _advapi32
+    .lookupFunction<
+      Int32 Function(
+        IntPtr,
+        Pointer<Utf16>,
+        Pointer<Uint32>,
+        Pointer<Uint32>,
+        Pointer<Void>,
+        Pointer<Uint32>,
+      ),
+      int Function(
+        int,
+        Pointer<Utf16>,
+        Pointer<Uint32>,
+        Pointer<Uint32>,
+        Pointer<Void>,
+        Pointer<Uint32>,
+      )
+    >('RegQueryValueExW');
 
-final _cmGetParent = _cfgmgr32.lookupFunction<
-    Int32 Function(Pointer<Uint32>, Uint32, Uint32),
-    int Function(Pointer<Uint32>, int, int)>('CM_Get_Parent');
+final _cmGetParent = _cfgmgr32
+    .lookupFunction<
+      Int32 Function(Pointer<Uint32>, Uint32, Uint32),
+      int Function(Pointer<Uint32>, int, int)
+    >('CM_Get_Parent');
 
-final _cmGetDeviceId = _cfgmgr32.lookupFunction<
-    Int32 Function(Uint32, Pointer<Utf16>, Uint32, Uint32),
-    int Function(int, Pointer<Utf16>, int, int)>('CM_Get_Device_IDW');
+final _cmGetDeviceId = _cfgmgr32
+    .lookupFunction<
+      Int32 Function(Uint32, Pointer<Utf16>, Uint32, Uint32),
+      int Function(int, Pointer<Utf16>, int, int)
+    >('CM_Get_Device_IDW');
 
-final _cmMapCrToWin32Err = _cfgmgr32.lookupFunction<
-    Uint32 Function(Uint32, Uint32),
-    int Function(int, int)>('CM_MapCrToWin32Err');
+final _cmMapCrToWin32Err = _cfgmgr32
+    .lookupFunction<Uint32 Function(Uint32, Uint32), int Function(int, int)>(
+      'CM_MapCrToWin32Err',
+    );
 
 final _getLastError = _kernel32
     .lookupFunction<Uint32 Function(), int Function()>('GetLastError');
@@ -123,10 +183,9 @@ String getParentSerialNumber(
   int depth = 0,
   String? lastSerialNumber,
 ]) {
-  String fallback() =>
-      (lastSerialNumber == null || lastSerialNumber.isEmpty)
-          ? ''
-          : lastSerialNumber;
+  String fallback() => (lastSerialNumber == null || lastSerialNumber.isEmpty)
+      ? ''
+      : lastSerialNumber;
 
   if (depth > _maxUsbDeviceTreeTraversalDepth) {
     return fallback();
@@ -185,7 +244,12 @@ String getParentSerialNumber(
 
     if (vid == null || vid == 0 || pid == null || pid == 0) {
       return getParentSerialNumber(
-          devinst.value, childVid, childPid, depth + 1, foundSerialNumber);
+        devinst.value,
+        childVid,
+        childPid,
+        depth + 1,
+        foundSerialNumber,
+      );
     }
 
     if (pid != childPid || vid != childVid) {
@@ -194,7 +258,12 @@ String getParentSerialNumber(
 
     if (serialNumber == null || serialNumber.isEmpty) {
       return getParentSerialNumber(
-          devinst.value, childVid, childPid, depth + 1, foundSerialNumber);
+        devinst.value,
+        childVid,
+        childPid,
+        depth + 1,
+        foundSerialNumber,
+      );
     }
 
     return serialNumber;
@@ -326,8 +395,11 @@ List<ListPortInfo> windowsComports() {
             if (g7 != null && g7.isNotEmpty && _wordRe.hasMatch(g7)) {
               info.serialNumber = g7;
             } else {
-              info.serialNumber =
-                  getParentSerialNumber(devinfo.ref.devInst, info.vid, info.pid);
+              info.serialNumber = getParentSerialNumber(
+                devinfo.ref.devInst,
+                info.vid,
+                info.pid,
+              );
             }
           }
 

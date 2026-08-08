@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-
 import '../../../protobuf.dart';
 import '../../common/log.dart';
 import '../../model/device.dart';
@@ -264,9 +263,7 @@ extension FlipperStorageApi on FlipperClient {
     bool Function()? isCancelled,
   }) async {
     final total = data.length;
-    final rpcChunkSize =
-        transport?.storageChunkSize ??
-        Transport.bleChunkSize;
+    final rpcChunkSize = transport?.storageChunkSize ?? Transport.bleChunkSize;
     final totalFrames = total == 0
         ? 1
         : ((total + rpcChunkSize - 1) ~/ rpcChunkSize);

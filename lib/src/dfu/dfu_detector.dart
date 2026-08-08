@@ -102,9 +102,10 @@ class DfuUsb {
   }
 
   T _withDeviceList<T>(
-    T Function(Libusb usb, Pointer<Pointer<LibusbDevice>> list, int count) body,
-    {required T orElse}
-  ) {
+    T Function(Libusb usb, Pointer<Pointer<LibusbDevice>> list, int count)
+    body, {
+    required T orElse,
+  }) {
     if (!_ensureInit()) return orElse;
     final usb = Libusb.instance!;
     final listOut = malloc<Pointer<Pointer<LibusbDevice>>>();

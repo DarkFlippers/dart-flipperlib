@@ -1,6 +1,5 @@
 import 'dart:async';
 
-
 import '../../../protobuf.dart';
 import '../../model/enums.dart';
 import '../client.dart';

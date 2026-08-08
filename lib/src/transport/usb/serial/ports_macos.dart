@@ -19,65 +19,89 @@ final DynamicLibrary _cf = DynamicLibrary.open(
   '/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation',
 );
 
-final Pointer<Void> _kCFAllocatorDefault =
-    _cf.lookup<Pointer<Void>>('kCFAllocatorDefault').value;
+final Pointer<Void> _kCFAllocatorDefault = _cf
+    .lookup<Pointer<Void>>('kCFAllocatorDefault')
+    .value;
 
 final _ioServiceMatching = _iokit
-    .lookupFunction<Pointer<Void> Function(Pointer<Utf8>),
-        Pointer<Void> Function(Pointer<Utf8>)>('IOServiceMatching');
+    .lookupFunction<
+      Pointer<Void> Function(Pointer<Utf8>),
+      Pointer<Void> Function(Pointer<Utf8>)
+    >('IOServiceMatching');
 
-final _ioServiceGetMatchingServices = _iokit.lookupFunction<
-    Int32 Function(Uint32, Pointer<Void>, Pointer<Uint32>),
-    int Function(
-        int, Pointer<Void>, Pointer<Uint32>)>('IOServiceGetMatchingServices');
+final _ioServiceGetMatchingServices = _iokit
+    .lookupFunction<
+      Int32 Function(Uint32, Pointer<Void>, Pointer<Uint32>),
+      int Function(int, Pointer<Void>, Pointer<Uint32>)
+    >('IOServiceGetMatchingServices');
 
-final _ioIteratorIsValid = _iokit.lookupFunction<Int32 Function(Uint32),
-    int Function(int)>('IOIteratorIsValid');
+final _ioIteratorIsValid = _iokit
+    .lookupFunction<Int32 Function(Uint32), int Function(int)>(
+      'IOIteratorIsValid',
+    );
 
-final _ioIteratorNext = _iokit.lookupFunction<Uint32 Function(Uint32),
-    int Function(int)>('IOIteratorNext');
+final _ioIteratorNext = _iokit
+    .lookupFunction<Uint32 Function(Uint32), int Function(int)>(
+      'IOIteratorNext',
+    );
 
-final _ioObjectRelease = _iokit.lookupFunction<Int32 Function(Uint32),
-    int Function(int)>('IOObjectRelease');
+final _ioObjectRelease = _iokit
+    .lookupFunction<Int32 Function(Uint32), int Function(int)>(
+      'IOObjectRelease',
+    );
 
-final _ioRegistryEntryGetParentEntry = _iokit.lookupFunction<
-    Int32 Function(Uint32, Pointer<Utf8>, Pointer<Uint32>),
-    int Function(int, Pointer<Utf8>,
-        Pointer<Uint32>)>('IORegistryEntryGetParentEntry');
+final _ioRegistryEntryGetParentEntry = _iokit
+    .lookupFunction<
+      Int32 Function(Uint32, Pointer<Utf8>, Pointer<Uint32>),
+      int Function(int, Pointer<Utf8>, Pointer<Uint32>)
+    >('IORegistryEntryGetParentEntry');
 
-final _ioRegistryEntryCreateCFProperty = _iokit.lookupFunction<
-    Pointer<Void> Function(Uint32, Pointer<Void>, Pointer<Void>, Uint32),
-    Pointer<Void> Function(int, Pointer<Void>, Pointer<Void>,
-        int)>('IORegistryEntryCreateCFProperty');
+final _ioRegistryEntryCreateCFProperty = _iokit
+    .lookupFunction<
+      Pointer<Void> Function(Uint32, Pointer<Void>, Pointer<Void>, Uint32),
+      Pointer<Void> Function(int, Pointer<Void>, Pointer<Void>, int)
+    >('IORegistryEntryCreateCFProperty');
 
-final _ioRegistryEntryGetName = _iokit.lookupFunction<
-    Int32 Function(Uint32, Pointer<Utf8>),
-    int Function(int, Pointer<Utf8>)>('IORegistryEntryGetName');
+final _ioRegistryEntryGetName = _iokit
+    .lookupFunction<
+      Int32 Function(Uint32, Pointer<Utf8>),
+      int Function(int, Pointer<Utf8>)
+    >('IORegistryEntryGetName');
 
-final _ioObjectGetClass = _iokit.lookupFunction<
-    Int32 Function(Uint32, Pointer<Utf8>),
-    int Function(int, Pointer<Utf8>)>('IOObjectGetClass');
+final _ioObjectGetClass = _iokit
+    .lookupFunction<
+      Int32 Function(Uint32, Pointer<Utf8>),
+      int Function(int, Pointer<Utf8>)
+    >('IOObjectGetClass');
 
-final _cfStringCreateWithCString = _cf.lookupFunction<
-    Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Int32),
-    Pointer<Void> Function(
-        Pointer<Void>, Pointer<Utf8>, int)>('CFStringCreateWithCString');
+final _cfStringCreateWithCString = _cf
+    .lookupFunction<
+      Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, Int32),
+      Pointer<Void> Function(Pointer<Void>, Pointer<Utf8>, int)
+    >('CFStringCreateWithCString');
 
-final _cfStringGetCStringPtr = _cf.lookupFunction<
-    Pointer<Utf8> Function(Pointer<Void>, Uint32),
-    Pointer<Utf8> Function(Pointer<Void>, int)>('CFStringGetCStringPtr');
+final _cfStringGetCStringPtr = _cf
+    .lookupFunction<
+      Pointer<Utf8> Function(Pointer<Void>, Uint32),
+      Pointer<Utf8> Function(Pointer<Void>, int)
+    >('CFStringGetCStringPtr');
 
-final _cfStringGetCString = _cf.lookupFunction<
-    Uint8 Function(Pointer<Void>, Pointer<Utf8>, Int64, Uint32),
-    int Function(
-        Pointer<Void>, Pointer<Utf8>, int, int)>('CFStringGetCString');
+final _cfStringGetCString = _cf
+    .lookupFunction<
+      Uint8 Function(Pointer<Void>, Pointer<Utf8>, Int64, Uint32),
+      int Function(Pointer<Void>, Pointer<Utf8>, int, int)
+    >('CFStringGetCString');
 
-final _cfNumberGetValue = _cf.lookupFunction<
-    Uint8 Function(Pointer<Void>, Int64, Pointer<Void>),
-    int Function(Pointer<Void>, int, Pointer<Void>)>('CFNumberGetValue');
+final _cfNumberGetValue = _cf
+    .lookupFunction<
+      Uint8 Function(Pointer<Void>, Int64, Pointer<Void>),
+      int Function(Pointer<Void>, int, Pointer<Void>)
+    >('CFNumberGetValue');
 
-final _cfRelease = _cf.lookupFunction<Void Function(Pointer<Void>),
-    void Function(Pointer<Void>)>('CFRelease');
+final _cfRelease = _cf
+    .lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
+      'CFRelease',
+    );
 
 String? _getStringProperty(int deviceType, String property) {
   return using((arena) {
@@ -238,8 +262,11 @@ List<_SuitableSerialInterface> _scanInterfaces() {
       final usbDevice = _getParentDeviceByType(service, 'IOUSBInterface');
       if (usbDevice != null) {
         final name = _getStringProperty(usbDevice, 'USB Interface Name');
-        final locationId =
-            _getIntProperty(usbDevice, 'locationID', _kCFNumberSInt32Type);
+        final locationId = _getIntProperty(
+          usbDevice,
+          'locationID',
+          _kCFNumberSInt32Type,
+        );
         final i = _SuitableSerialInterface();
         i.id = (locationId == null || locationId == 0) ? '' : locationId;
         i.name = name;
@@ -273,19 +300,28 @@ List<ListPortInfo> macosComports() {
       var usbDevice = _getParentDeviceByType(service, 'IOUSBHostDevice');
       usbDevice ??= _getParentDeviceByType(service, 'IOUSBDevice');
       if (usbDevice != null) {
-        info.vid =
-            _getIntProperty(usbDevice, 'idVendor', _kCFNumberSInt16Type);
-        info.pid =
-            _getIntProperty(usbDevice, 'idProduct', _kCFNumberSInt16Type);
-        info.serialNumber =
-            _getStringProperty(usbDevice, _kUSBSerialNumberString);
+        info.vid = _getIntProperty(usbDevice, 'idVendor', _kCFNumberSInt16Type);
+        info.pid = _getIntProperty(
+          usbDevice,
+          'idProduct',
+          _kCFNumberSInt16Type,
+        );
+        info.serialNumber = _getStringProperty(
+          usbDevice,
+          _kUSBSerialNumberString,
+        );
         info.product = _ioRegistryEntryGetNameString(usbDevice) ?? 'n/a';
         info.manufacturer = _getStringProperty(usbDevice, _kUSBVendorString);
-        final locationId =
-            _getIntProperty(usbDevice, 'locationID', _kCFNumberSInt32Type);
+        final locationId = _getIntProperty(
+          usbDevice,
+          'locationID',
+          _kCFNumberSInt32Type,
+        );
         info.location = locationToString(locationId!);
-        info.interface =
-            _searchForLocationIdInInterfaces(serialInterfaces, locationId);
+        info.interface = _searchForLocationIdInInterfaces(
+          serialInterfaces,
+          locationId,
+        );
         info.applyUsbInfo();
       }
       ports.add(info);

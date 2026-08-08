@@ -206,19 +206,15 @@ typedef LibusbFreeConfigDescriptor =
     void Function(Pointer<LibusbConfigDescriptor>);
 
 typedef _GetStringDescriptorAsciiNative =
-    Int32 Function(
-      Pointer<LibusbDeviceHandle>,
-      Uint8,
-      Pointer<Uint8>,
-      Int32,
-    );
+    Int32 Function(Pointer<LibusbDeviceHandle>, Uint8, Pointer<Uint8>, Int32);
 typedef LibusbGetStringDescriptorAscii =
     int Function(Pointer<LibusbDeviceHandle>, int, Pointer<Uint8>, int);
 
 typedef _ErrorNameNative = Pointer<Utf8> Function(Int32);
 typedef LibusbErrorName = Pointer<Utf8> Function(int);
 
-typedef _SetAutoDetachNative = Int32 Function(Pointer<LibusbDeviceHandle>, Int32);
+typedef _SetAutoDetachNative =
+    Int32 Function(Pointer<LibusbDeviceHandle>, Int32);
 typedef LibusbSetAutoDetach = int Function(Pointer<LibusbDeviceHandle>, int);
 
 typedef _RefDeviceNative =
@@ -346,7 +342,8 @@ class Libusb {
         () => DynamicLibrary.open(
           '/opt/homebrew/opt/libusb/lib/libusb-1.0.0.dylib',
         ),
-        () => DynamicLibrary.open('/usr/local/opt/libusb/lib/libusb-1.0.0.dylib'),
+        () =>
+            DynamicLibrary.open('/usr/local/opt/libusb/lib/libusb-1.0.0.dylib'),
       ],
       if (Platform.isLinux) ...[
         () => DynamicLibrary.open('libusb-1.0.so.0'),

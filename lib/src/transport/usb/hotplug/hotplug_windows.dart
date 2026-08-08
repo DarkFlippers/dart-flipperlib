@@ -73,8 +73,7 @@ final class _DevBroadcastDeviceInterface extends Struct {
   external int dbccName;
 }
 
-typedef _WndProcNative = IntPtr Function(
-    Pointer<Void>, Uint32, IntPtr, IntPtr);
+typedef _WndProcNative = IntPtr Function(Pointer<Void>, Uint32, IntPtr, IntPtr);
 
 class WindowsHotplugWatcher implements UsbHotplugWatcher {
   Isolate? _isolate;
@@ -83,9 +82,11 @@ class WindowsHotplugWatcher implements UsbHotplugWatcher {
   void Function()? _onEvent;
 
   static final _user32 = DynamicLibrary.open('user32.dll');
-  static final _postMessageW = _user32.lookupFunction<
-      Int32 Function(IntPtr, Uint32, IntPtr, IntPtr),
-      int Function(int, int, int, int)>('PostMessageW');
+  static final _postMessageW = _user32
+      .lookupFunction<
+        Int32 Function(IntPtr, Uint32, IntPtr, IntPtr),
+        int Function(int, int, int, int)
+      >('PostMessageW');
 
   @override
   bool start(void Function() onEvent) {
@@ -101,11 +102,14 @@ class WindowsHotplugWatcher implements UsbHotplugWatcher {
       }
     });
 
-    Isolate.spawn(_windowEntry, recv.sendPort).then((iso) {
-      _isolate = iso;
-    }, onError: (Object e) {
-      Log.error('[USB] Windows hotplug isolate spawn failed: $e');
-    });
+    Isolate.spawn(_windowEntry, recv.sendPort).then(
+      (iso) {
+        _isolate = iso;
+      },
+      onError: (Object e) {
+        Log.error('[USB] Windows hotplug isolate spawn failed: $e');
+      },
+    );
     return true;
   }
 
@@ -133,41 +137,86 @@ void _windowEntry(SendPort mainSend) {
   final kernel32 = DynamicLibrary.open('kernel32.dll');
   final user32 = DynamicLibrary.open('user32.dll');
 
-  final getModuleHandleW = kernel32.lookupFunction<
-      Pointer<Void> Function(Pointer<Utf16>),
-      Pointer<Void> Function(Pointer<Utf16>)>('GetModuleHandleW');
-  final registerClassExW = user32.lookupFunction<
-      Uint16 Function(Pointer<_Wndclassexw>),
-      int Function(Pointer<_Wndclassexw>)>('RegisterClassExW');
-  final createWindowExW = user32.lookupFunction<
-      Pointer<Void> Function(Uint32, Pointer<Utf16>, Pointer<Utf16>, Uint32,
-          Int32, Int32, Int32, Int32, Pointer<Void>, Pointer<Void>,
-          Pointer<Void>, Pointer<Void>),
-      Pointer<Void> Function(int, Pointer<Utf16>, Pointer<Utf16>, int, int,
-          int, int, int, Pointer<Void>, Pointer<Void>, Pointer<Void>,
-          Pointer<Void>)>('CreateWindowExW');
-  final defWindowProcW = user32.lookupFunction<
-      IntPtr Function(Pointer<Void>, Uint32, IntPtr, IntPtr),
-      int Function(Pointer<Void>, int, int, int)>('DefWindowProcW');
-  final destroyWindow = user32.lookupFunction<Int32 Function(Pointer<Void>),
-      int Function(Pointer<Void>)>('DestroyWindow');
-  final postQuitMessage = user32.lookupFunction<Void Function(Int32),
-      void Function(int)>('PostQuitMessage');
-  final registerDeviceNotificationW = user32.lookupFunction<
-      Pointer<Void> Function(Pointer<Void>, Pointer<Void>, Uint32),
-      Pointer<Void> Function(Pointer<Void>, Pointer<Void>, int)>(
-      'RegisterDeviceNotificationW');
-  final unregisterDeviceNotification = user32.lookupFunction<
-      Int32 Function(Pointer<Void>),
-      int Function(Pointer<Void>)>('UnregisterDeviceNotification');
-  final getMessageW = user32.lookupFunction<
-      Int32 Function(Pointer<_Msg>, Pointer<Void>, Uint32, Uint32),
-      int Function(Pointer<_Msg>, Pointer<Void>, int, int)>('GetMessageW');
-  final translateMessage = user32.lookupFunction<Int32 Function(Pointer<_Msg>),
-      int Function(Pointer<_Msg>)>('TranslateMessage');
-  final dispatchMessageW = user32.lookupFunction<
-      IntPtr Function(Pointer<_Msg>),
-      int Function(Pointer<_Msg>)>('DispatchMessageW');
+  final getModuleHandleW = kernel32
+      .lookupFunction<
+        Pointer<Void> Function(Pointer<Utf16>),
+        Pointer<Void> Function(Pointer<Utf16>)
+      >('GetModuleHandleW');
+  final registerClassExW = user32
+      .lookupFunction<
+        Uint16 Function(Pointer<_Wndclassexw>),
+        int Function(Pointer<_Wndclassexw>)
+      >('RegisterClassExW');
+  final createWindowExW = user32
+      .lookupFunction<
+        Pointer<Void> Function(
+          Uint32,
+          Pointer<Utf16>,
+          Pointer<Utf16>,
+          Uint32,
+          Int32,
+          Int32,
+          Int32,
+          Int32,
+          Pointer<Void>,
+          Pointer<Void>,
+          Pointer<Void>,
+          Pointer<Void>,
+        ),
+        Pointer<Void> Function(
+          int,
+          Pointer<Utf16>,
+          Pointer<Utf16>,
+          int,
+          int,
+          int,
+          int,
+          int,
+          Pointer<Void>,
+          Pointer<Void>,
+          Pointer<Void>,
+          Pointer<Void>,
+        )
+      >('CreateWindowExW');
+  final defWindowProcW = user32
+      .lookupFunction<
+        IntPtr Function(Pointer<Void>, Uint32, IntPtr, IntPtr),
+        int Function(Pointer<Void>, int, int, int)
+      >('DefWindowProcW');
+  final destroyWindow = user32
+      .lookupFunction<
+        Int32 Function(Pointer<Void>),
+        int Function(Pointer<Void>)
+      >('DestroyWindow');
+  final postQuitMessage = user32
+      .lookupFunction<Void Function(Int32), void Function(int)>(
+        'PostQuitMessage',
+      );
+  final registerDeviceNotificationW = user32
+      .lookupFunction<
+        Pointer<Void> Function(Pointer<Void>, Pointer<Void>, Uint32),
+        Pointer<Void> Function(Pointer<Void>, Pointer<Void>, int)
+      >('RegisterDeviceNotificationW');
+  final unregisterDeviceNotification = user32
+      .lookupFunction<
+        Int32 Function(Pointer<Void>),
+        int Function(Pointer<Void>)
+      >('UnregisterDeviceNotification');
+  final getMessageW = user32
+      .lookupFunction<
+        Int32 Function(Pointer<_Msg>, Pointer<Void>, Uint32, Uint32),
+        int Function(Pointer<_Msg>, Pointer<Void>, int, int)
+      >('GetMessageW');
+  final translateMessage = user32
+      .lookupFunction<
+        Int32 Function(Pointer<_Msg>),
+        int Function(Pointer<_Msg>)
+      >('TranslateMessage');
+  final dispatchMessageW = user32
+      .lookupFunction<
+        IntPtr Function(Pointer<_Msg>),
+        int Function(Pointer<_Msg>)
+      >('DispatchMessageW');
 
   final className = 'QUnleashedUsbHotplug'.toNativeUtf16();
   Pointer<Void> hwnd = nullptr;

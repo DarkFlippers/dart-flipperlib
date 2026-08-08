@@ -1,0 +1,27 @@
+group = "com.darkflippers.flipperlib"
+version = "1.0.0"
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: "com.android.library"
+
+android {
+    namespace = "com.darkflippers.flipperlib"
+    compileSdk = 35
+
+    // No native code on Android: USB goes through usb_serial and BLE through
+    // universal_ble. The module exists so the plugin can declare Android support.
+    defaultConfig {
+        minSdk = 21
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+}

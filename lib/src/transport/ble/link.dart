@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-
 import '../../common/log.dart';
 import '../../model/discovered.dart';
 import '../../model/enums.dart';
@@ -240,9 +239,7 @@ abstract class UniversalBleTransportBase extends Transport {
           .requestMtu(deviceId, 517)
           .timeout(_gattOpTimeout);
     } catch (e) {
-      Log.error(
-        '[BLE] requestMtu failed: $e (using default $negotiatedMtu)',
-      );
+      Log.error('[BLE] requestMtu failed: $e (using default $negotiatedMtu)');
     }
 
     // Every GATT step is bounded: a platform stack that never answers (a
@@ -250,9 +247,7 @@ abstract class UniversalBleTransportBase extends Transport {
     // lifecycle chain forever — including the user's disconnect().
     final List<BleService> services;
     try {
-      services = await _ops
-          .discoverServices(deviceId)
-          .timeout(_gattOpTimeout);
+      services = await _ops.discoverServices(deviceId).timeout(_gattOpTimeout);
     } on TimeoutException {
       throw FlipperTransportError(
         'BLE service discovery timed out after ${_gattOpTimeout.inSeconds}s',
@@ -371,7 +366,10 @@ abstract class UniversalBleTransportBase extends Transport {
             '[BLE] link dropped during first-time pairing (attempt $attempt); '
             'reconnecting so the user can finish entering the PIN',
           );
-          final reconnected = await _reconnectForPairing(deviceId, pairingAbort);
+          final reconnected = await _reconnectForPairing(
+            deviceId,
+            pairingAbort,
+          );
           if (!reconnected) {
             throw FlipperTransportError('BLE connect aborted');
           }
@@ -730,7 +728,9 @@ abstract class UniversalBleTransportBase extends Transport {
 
     _markBleDisconnected();
     if (!wasDisconnecting) {
-      onTransportFault(FlipperTransportError('BLE $reason [$cause] ($diagnostics)'));
+      onTransportFault(
+        FlipperTransportError('BLE $reason [$cause] ($diagnostics)'),
+      );
     }
   }
 
@@ -818,9 +818,7 @@ abstract class UniversalBleTransportBase extends Transport {
     _budget = remaining;
     _budgetGen += 1;
     if (Log.debugOn) {
-      Log.debug(
-        '[BLE] credit granted: $remaining bytes (gen $_budgetGen)',
-      );
+      Log.debug('[BLE] credit granted: $remaining bytes (gen $_budgetGen)');
     }
     final signal = _budgetSignal;
     _budgetSignal = null;
@@ -1028,9 +1026,7 @@ abstract class UniversalBleTransportBase extends Transport {
             'link presumed dead',
           );
         }
-        Log.info(
-          '[BLE] write callback timed out; continuing without retry',
-        );
+        Log.info('[BLE] write callback timed out; continuing without retry');
       }
       _bytesWrittenSinceOpen += chunkEnd - offset;
       offset = chunkEnd;

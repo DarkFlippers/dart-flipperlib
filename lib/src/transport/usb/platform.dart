@@ -143,9 +143,7 @@ abstract class SerialUsbPlatformBase extends UsbPlatform {
     );
   }
 
-  List<FlipperDevice> comportsDevices(
-    List<ListPortInfo> Function() comports,
-  ) {
+  List<FlipperDevice> comportsDevices(List<ListPortInfo> Function() comports) {
     try {
       return [for (final info in comports()) serialDevice(info)];
     } catch (e) {

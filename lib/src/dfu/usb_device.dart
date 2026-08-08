@@ -61,15 +61,15 @@ class UsbDeviceBackend {
     _handle = nullptr;
   }
 
-  bool claimInterface(int interfaceNum) =>
-      _retry(() => _usb.claimInterface(_handle, interfaceNum), 'claimInterface');
+  bool claimInterface(int interfaceNum) => _retry(
+    () => _usb.claimInterface(_handle, interfaceNum),
+    'claimInterface',
+  );
 
   bool releaseInterface(int interfaceNum) {
     final err = _usb.releaseInterface(_handle, interfaceNum);
     if (err != libusbSuccess) {
-      Log.error(
-        '[DFU] releaseInterface failed: ${_usb.errorString(err)}',
-      );
+      Log.error('[DFU] releaseInterface failed: ${_usb.errorString(err)}');
     }
     return err == libusbSuccess;
   }
@@ -107,9 +107,7 @@ class UsbDeviceBackend {
         sleep(const Duration(milliseconds: _retryIntervalMs));
       }
       if (res < 0) {
-        Log.error(
-          '[DFU] control OUT failed: ${_usb.errorString(res)}',
-        );
+        Log.error('[DFU] control OUT failed: ${_usb.errorString(res)}');
       }
       return res == len;
     } finally {
@@ -198,9 +196,7 @@ class UsbDeviceBackend {
         final descIndex = (intf.altsetting + alt).ref.iInterface;
         final res = _usb.getStringDescriptorAscii(_handle, descIndex, buf, 254);
         if (res < 0) {
-          Log.error(
-            '[DFU] string descriptor failed: ${_usb.errorString(res)}',
-          );
+          Log.error('[DFU] string descriptor failed: ${_usb.errorString(res)}');
           return '';
         }
         return String.fromCharCodes(buf.asTypedList(res));

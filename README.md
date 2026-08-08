@@ -34,7 +34,7 @@ Recovery needs libusb: bundled on macOS, `libusb-1.0` from the system on Linux a
 
 ```yaml
 dependencies:
-  flipperlib: ^0.1.0
+  flipperlib: ^1.0.0
 ```
 
 ## Usage

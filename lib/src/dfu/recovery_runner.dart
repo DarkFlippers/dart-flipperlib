@@ -337,7 +337,13 @@ void _validateOptionBytesRequest(RecoveryRequest req) {
 // ── Wireless-stack (FUS) install, port of qFlipper's
 // WirelessStackDownloadOperation + Recovery FUS methods ──────────────────────
 
-enum _WirelessStatus { invalid, fusRunning, wsRunning, errorOccured, unhandledState }
+enum _WirelessStatus {
+  invalid,
+  fusRunning,
+  wsRunning,
+  errorOccured,
+  unhandledState,
+}
 
 const int _installTryCount = 3;
 const int _checkTryCount = 3;
@@ -387,7 +393,9 @@ void _startFus(void Function(Object) send) {
       throw StateError('Failed to get FUS state');
     } else if (state.status == FusStatus.idle &&
         state.error == FusError.noError) {
-      send(const RecoveryLog('FUS is already running, rebooting for consistency'));
+      send(
+        const RecoveryLog('FUS is already running, rebooting for consistency'),
+      );
       if (!dev.leave()) throw StateError('Failed to leave DFU mode');
     } else if (state.status == FusStatus.errorOccured &&
         state.error == FusError.notRunning) {

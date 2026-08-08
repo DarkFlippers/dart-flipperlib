@@ -22,72 +22,97 @@ const String _kSerialBsdClient = 'IOSerialBSDClient';
 
 typedef _NotifyCallbackNative = Void Function(Pointer<Void>, Uint32);
 
-final _ioNotificationPortCreate = _iokit.lookupFunction<
-    Pointer<Void> Function(Uint32),
-    Pointer<Void> Function(int)>('IONotificationPortCreate');
+final _ioNotificationPortCreate = _iokit
+    .lookupFunction<
+      Pointer<Void> Function(Uint32),
+      Pointer<Void> Function(int)
+    >('IONotificationPortCreate');
 
-final _ioNotificationPortSetDispatchQueue = _iokit.lookupFunction<
-    Void Function(Pointer<Void>, Pointer<Void>),
-    void Function(Pointer<Void>, Pointer<Void>)>(
-    'IONotificationPortSetDispatchQueue');
+final _ioNotificationPortSetDispatchQueue = _iokit
+    .lookupFunction<
+      Void Function(Pointer<Void>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<Void>)
+    >('IONotificationPortSetDispatchQueue');
 
-final _ioNotificationPortDestroy = _iokit.lookupFunction<
-    Void Function(Pointer<Void>),
-    void Function(Pointer<Void>)>('IONotificationPortDestroy');
+final _ioNotificationPortDestroy = _iokit
+    .lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
+      'IONotificationPortDestroy',
+    );
 
 // Same symbol as a raw dispatch_function_t: void(*)(void* context). Its ABI
 // (one pointer argument, no return) matches dispatch_sync_f's work function, so
 // we can run the destroy *on the notifier's own queue* with the port as the
 // context — serializing it with any callout already in flight.
 final Pointer<NativeFunction<Void Function(Pointer<Void>)>>
-    _ioNotificationPortDestroyFn = _iokit
-        .lookup<NativeFunction<Void Function(Pointer<Void>)>>(
-        'IONotificationPortDestroy');
+_ioNotificationPortDestroyFn = _iokit
+    .lookup<NativeFunction<Void Function(Pointer<Void>)>>(
+      'IONotificationPortDestroy',
+    );
 
-final _ioServiceMatching = _iokit.lookupFunction<
-    Pointer<Void> Function(Pointer<Utf8>),
-    Pointer<Void> Function(Pointer<Utf8>)>('IOServiceMatching');
+final _ioServiceMatching = _iokit
+    .lookupFunction<
+      Pointer<Void> Function(Pointer<Utf8>),
+      Pointer<Void> Function(Pointer<Utf8>)
+    >('IOServiceMatching');
 
-final _ioServiceAddMatchingNotification = _iokit.lookupFunction<
-    Int32 Function(
+final _ioServiceAddMatchingNotification = _iokit
+    .lookupFunction<
+      Int32 Function(
         Pointer<Void>,
         Pointer<Utf8>,
         Pointer<Void>,
         Pointer<NativeFunction<_NotifyCallbackNative>>,
         Pointer<Void>,
-        Pointer<Uint32>),
-    int Function(
+        Pointer<Uint32>,
+      ),
+      int Function(
         Pointer<Void>,
         Pointer<Utf8>,
         Pointer<Void>,
         Pointer<NativeFunction<_NotifyCallbackNative>>,
         Pointer<Void>,
-        Pointer<Uint32>)>('IOServiceAddMatchingNotification');
+        Pointer<Uint32>,
+      )
+    >('IOServiceAddMatchingNotification');
 
-final _ioIteratorNext = _iokit.lookupFunction<Uint32 Function(Uint32),
-    int Function(int)>('IOIteratorNext');
+final _ioIteratorNext = _iokit
+    .lookupFunction<Uint32 Function(Uint32), int Function(int)>(
+      'IOIteratorNext',
+    );
 
-final _ioObjectRelease = _iokit.lookupFunction<Int32 Function(Uint32),
-    int Function(int)>('IOObjectRelease');
+final _ioObjectRelease = _iokit
+    .lookupFunction<Int32 Function(Uint32), int Function(int)>(
+      'IOObjectRelease',
+    );
 
-final _dispatchQueueCreate = _system.lookupFunction<
-    Pointer<Void> Function(Pointer<Utf8>, Pointer<Void>),
-    Pointer<Void> Function(Pointer<Utf8>, Pointer<Void>)>(
-    'dispatch_queue_create');
+final _dispatchQueueCreate = _system
+    .lookupFunction<
+      Pointer<Void> Function(Pointer<Utf8>, Pointer<Void>),
+      Pointer<Void> Function(Pointer<Utf8>, Pointer<Void>)
+    >('dispatch_queue_create');
 
-final _dispatchRelease = _system.lookupFunction<Void Function(Pointer<Void>),
-    void Function(Pointer<Void>)>('dispatch_release');
+final _dispatchRelease = _system
+    .lookupFunction<Void Function(Pointer<Void>), void Function(Pointer<Void>)>(
+      'dispatch_release',
+    );
 
 // dispatch_sync_f(queue, context, work) — runs `work(context)` on `queue` and
 // blocks until it (and everything queued ahead of it) has finished. Used to run
 // the notifier teardown on the notifier's own serial queue, serialized with any
 // callout in flight.
-final _dispatchSyncF = _system.lookupFunction<
-    Void Function(Pointer<Void>, Pointer<Void>,
-        Pointer<NativeFunction<Void Function(Pointer<Void>)>>),
-    void Function(Pointer<Void>, Pointer<Void>,
-        Pointer<NativeFunction<Void Function(Pointer<Void>)>>)>(
-    'dispatch_sync_f');
+final _dispatchSyncF = _system
+    .lookupFunction<
+      Void Function(
+        Pointer<Void>,
+        Pointer<Void>,
+        Pointer<NativeFunction<Void Function(Pointer<Void>)>>,
+      ),
+      void Function(
+        Pointer<Void>,
+        Pointer<Void>,
+        Pointer<NativeFunction<Void Function(Pointer<Void>)>>,
+      )
+    >('dispatch_sync_f');
 
 class MacosHotplugWatcher implements UsbHotplugWatcher {
   NativeCallable<_NotifyCallbackNative>? _callable;

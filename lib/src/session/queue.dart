@@ -97,9 +97,7 @@ class PendingRpc {
     try {
       onFrame?.call(frame);
     } catch (error) {
-      Log.error(
-        '[RPC] onFrame callback threw for cmdId=$commandId: $error',
-      );
+      Log.error('[RPC] onFrame callback threw for cmdId=$commandId: $error');
     }
   }
 

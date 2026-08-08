@@ -1,6 +1,5 @@
 import 'dart:async';
 
-
 import '../../../protobuf.dart';
 import '../../model/enums.dart';
 import '../client.dart';
@@ -101,9 +100,6 @@ extension FlipperGuiApi on FlipperClient {
     SendInputEventRequest request, {
     FlipperRequestPriority priority = FlipperRequestPriority.rightNow,
   }) {
-    return sendRpc(
-      Main(guiSendInputEventRequest: request),
-      priority: priority,
-    );
+    return sendRpc(Main(guiSendInputEventRequest: request), priority: priority);
   }
 }

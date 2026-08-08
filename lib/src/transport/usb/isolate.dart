@@ -121,7 +121,10 @@ void desktopUsbIsolateEntry(DesktopUsbIsolateConfig config) {
           final n = port.write(slice, timeout: 5000);
           if (n <= 0) {
             config.eventPort.send(
-              DesktopUsbWriteAck(message.seq, 'write returned $n at offset $offset'),
+              DesktopUsbWriteAck(
+                message.seq,
+                'write returned $n at offset $offset',
+              ),
             );
             return;
           }

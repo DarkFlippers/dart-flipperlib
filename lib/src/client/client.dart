@@ -40,8 +40,7 @@ class FlipperClient {
   final errorCtrl = StreamController<FlipperRpcException>.broadcast();
   final deviceInfoCompleteCtrl =
       StreamController<Map<String, String>>.broadcast();
-  final deviceInfoWatchCtrl =
-      StreamController<Map<String, String>>.broadcast();
+  final deviceInfoWatchCtrl = StreamController<Map<String, String>>.broadcast();
   final storageMutationCtrl = StreamController<void>.broadcast();
   final _sessionsCtrl = StreamController<List<FlipperSessionInfo>>.broadcast();
 
@@ -156,7 +155,6 @@ class FlipperClient {
   FlipperDevice? get activeDevice => connectedDevice ?? connectingDevice;
 
   FlipperMode get mode => _active?.mode ?? FlipperMode.disconnected;
-
 
   bool get isConnected => _active?.isConnected ?? false;
 
@@ -585,8 +583,7 @@ class FlipperClient {
     });
   }
 
-  String _deviceKey(FlipperDevice device) =>
-      '${device.link.name}:${device.id}';
+  String _deviceKey(FlipperDevice device) => '${device.link.name}:${device.id}';
 
   FlipperSession? _findSession(String id, {FlipperLink? link}) {
     for (final session in _sessions.values) {
@@ -953,8 +950,7 @@ class FlipperClient {
   // the recovery operation is queued, and trusting it would burn a retry on
   // the dead session. A timeout is a result, not an exception.
   Future<bool> waitForRpcSession(Duration timeout) async {
-    bool healthy() =>
-        mode == FlipperMode.rpc && (transport?.isActive ?? false);
+    bool healthy() => mode == FlipperMode.rpc && (transport?.isActive ?? false);
 
     if (healthy()) return true;
     final restored = Completer<bool>();

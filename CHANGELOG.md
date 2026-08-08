@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.0
+
+- Declare Android, iOS, Linux, macOS and Windows as supported plugin platforms.
+- Upgrade `universal_ble` to 2.x.
+- Drop the unused `permission_handler` dependency.
+- Add an example app.
+
 ## 0.1.0
 
 First public release.

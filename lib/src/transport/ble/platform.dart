@@ -1,6 +1,5 @@
 import 'dart:async';
 
-
 import '../../model/discovered.dart';
 import '../transport.dart';
 import 'gatt.dart';
@@ -43,9 +42,8 @@ abstract class UniversalBlePlatformBase implements BlePlatform {
   }
 
   bool _advertisesFlipperService(BleDiscoveredDevice device) {
-    bool hasFlipper(Iterable<String> uuids) => uuids
-        .map((uuid) => uuid.toLowerCase())
-        .contains(flipperBleServiceUuid);
+    bool hasFlipper(Iterable<String> uuids) =>
+        uuids.map((uuid) => uuid.toLowerCase()).contains(flipperBleServiceUuid);
     return hasFlipper(device.device.services) ||
         hasFlipper(device.device.serviceData.keys);
   }
