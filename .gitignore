@@ -49,6 +49,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/.gradle
 
 # flipengine: local-only nested repo (github.com/apfxtech/flipper-engine), not part of qUnleashed.
 /lib/modules/cpp/flipengine/

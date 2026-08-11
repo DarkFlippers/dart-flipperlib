@@ -1,5 +1,6 @@
 # flipperlib
 
+[![source](https://img.shields.io/badge/source-GitHub-181717.svg?logo=github)](https://github.com/DarkFlippers/dart-flipperlib)
 [![pub package](https://img.shields.io/pub/v/flipperlib.svg)](https://pub.dev/packages/flipperlib)
 [![license](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 
@@ -7,6 +8,8 @@ Flipper Zero client for Flutter: BLE and USB links, the full protobuf RPC surfac
 passthrough and STM32WB55 recovery.
 
 Built for [qUnleashed](https://github.com/DarkFlippers/qUnleashed), a Flipper Zero companion app.
+Made by [ApertureFox Technology](https://github.com/apfxtech) at
+[DarkFlippers](https://github.com/DarkFlippers).
 
 ## Features
 
@@ -70,6 +73,12 @@ builds.
 Log.level = FlipperLogLevel.debug;
 Log.sink = (level, message) => print('[$level] $message');
 ```
+
+## See also
+
+- [dartufbt](https://pub.dev/packages/dartufbt) — build `.fap` packages (Flipper Application
+  Package): SDK deployment, ARM toolchain, compile and link. Desktop only. Build the `.fap`
+  there, ship it with flipperlib.
 
 ## License
 
