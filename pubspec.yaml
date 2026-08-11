@@ -2,7 +2,7 @@ name: flipperlib
 description: >-
   Flipper Zero client for Flutter: BLE and USB transports, protobuf RPC, CLI
   and STM32WB55 DFU recovery.
-version: 1.0.0
+version: 1.0.1
 repository: https://github.com/DarkFlippers/dart-flipperlib
 issue_tracker: https://github.com/DarkFlippers/dart-flipperlib/issues
 topics: [flipper-zero, ble, usb, embedded]
