@@ -946,16 +946,20 @@ class FlipperClient {
     Duration timeout = const Duration(seconds: 8),
     FlipperRequestPriority priority = FlipperRequestPriority.defaultPriority,
     void Function(Main frame)? onFrame,
+    void Function()? onSent,
     bool retainFrames = true,
     bool interleavable = false,
+    bool pipelined = false,
   }) {
     return _requireActiveSession().callRpcFrames(
       request,
       timeout: timeout,
       priority: priority,
       onFrame: onFrame,
+      onSent: onSent,
       retainFrames: retainFrames,
       interleavable: interleavable,
+      pipelined: pipelined,
     );
   }
 

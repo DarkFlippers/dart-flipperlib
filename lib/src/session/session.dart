@@ -605,6 +605,7 @@ class FlipperSession {
       frame: message,
       priority: priority,
       seq: _requestSeq++,
+      holdsTxUntilAnswer: false,
       onSent: () {
         if (!sent.isCompleted) sent.complete();
       },
@@ -636,8 +637,10 @@ class FlipperSession {
     Duration timeout = const Duration(seconds: 8),
     FlipperRequestPriority priority = FlipperRequestPriority.defaultPriority,
     void Function(Main frame)? onFrame,
+    void Function()? onSent,
     bool retainFrames = true,
     bool interleavable = false,
+    bool pipelined = false,
   }) async {
     if (mode != FlipperMode.rpc) {
       await switchToRpcMode();
@@ -658,9 +661,18 @@ class FlipperSession {
         priority: priority,
         seq: _requestSeq++,
         interleavable: interleavable,
+        holdsTxUntilAnswer: !pipelined,
         onSent: () {
           pending.started = true;
           pending.rearmTimeout();
+          if (onSent == null) return;
+          try {
+            onSent();
+          } catch (error) {
+            Log.error(
+              '[RPC] onSent callback threw for cmdId=$commandId: $error',
+            );
+          }
         },
         onError: (error) => _failPendingById(commandId, error),
       ),
@@ -743,6 +755,7 @@ class FlipperSession {
           frame: frame,
           priority: priority,
           seq: _requestSeq++,
+          holdsTxUntilAnswer: true,
           onSent: () {
             if (isFinal) finalFrameSent = true;
             pending.started = true;
@@ -951,10 +964,12 @@ class FlipperSession {
 
       if (frame.commandId != 0 && !frame.hasNext) {
         _releaseTxGroup(frame.commandId);
-        final pending = _pendingRpc[frame.commandId];
-        if (pending != null) {
-          // Settles on response, timeout or teardown — never hangs.
-          await pending.settled;
+        if (request.holdsTxUntilAnswer) {
+          final pending = _pendingRpc[frame.commandId];
+          if (pending != null) {
+            // Settles on response, timeout or teardown — never hangs.
+            await pending.settled;
+          }
         }
       }
       if (identical(_activeRequest, request)) _activeRequest = null;

@@ -14,12 +14,14 @@ class QueuedRequest implements Comparable<QueuedRequest> {
   final void Function()? onSent;
   final void Function(Object error)? onError;
   final bool interleavable;
+  final bool holdsTxUntilAnswer;
   bool _settled = false;
 
   QueuedRequest({
     required this.frame,
     required this.priority,
     required this.seq,
+    required this.holdsTxUntilAnswer,
     this.onSent,
     this.onError,
     this.interleavable = false,

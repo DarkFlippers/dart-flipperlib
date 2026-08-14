@@ -88,11 +88,15 @@ extension FlipperGuiApi on FlipperClient {
     SendInputEventRequest request, {
     Duration timeout = const Duration(seconds: 8),
     FlipperRequestPriority priority = FlipperRequestPriority.rightNow,
+    void Function()? onSent,
+    bool pipelined = true,
   }) {
     return callRpcFrames(
       Main(guiSendInputEventRequest: request),
       timeout: timeout,
       priority: priority,
+      onSent: onSent,
+      pipelined: pipelined,
     );
   }
 
