@@ -112,8 +112,11 @@ class FlipperSession {
   // chain; _reconnectLocked keeps the queue and the device-info cache alive
   // across re-establishment.
   Future<FlipperDevice> establishLocked({bool autoRpc = true}) async {
-    // A running scan competes with the connection for the radio.
+    // A running scan competes with the connection for the radio. stopScan
+    // returns once the platform scan is torn down; the settle then lets the
+    // radio come free before the link is claimed.
     await _client.stopScan();
+    await _client.awaitRadioSettled();
 
     final gen = ++_sessionGen;
     // Enter the `connecting` phase for the whole connect window. It returns to

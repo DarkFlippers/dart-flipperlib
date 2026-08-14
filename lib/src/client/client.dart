@@ -29,6 +29,11 @@ class FlipperClient {
   static const Duration quickDropWindow = Duration(seconds: 30);
   static const int maxQuickDropStreak = 2;
   static const Duration reconnectSettle = Duration(milliseconds: 600);
+  // Gap between tearing a scan down and claiming the link. The platform frees
+  // the radio asynchronously, and a connect issued in the same instant loses
+  // slots to the still-winding-down scan — on Apple that surfaces as
+  // CBErrorEncryptionTimedOut mid-pairing.
+  static const Duration radioSettle = Duration(milliseconds: 300);
 
   final _devicesCtrl = StreamController<List<FlipperDevice>>.broadcast();
   final connectionCtrl = StreamController<FlipperConnectionState>.broadcast();
@@ -58,6 +63,17 @@ class FlipperClient {
   StreamSubscription<void>? _usbPresenceSub;
 
   bool _scanning = false;
+  // Bumped by stopScan: a scan already queued on the lifecycle chain but not
+  // yet started sees a stale epoch and turns into a no-op instead of grabbing
+  // the radio right after the connect that cancelled it.
+  int _scanEpoch = 0;
+  // The running scan phase, awaited by stopScan so callers observe the radio
+  // as free only once the platform scan is actually torn down.
+  Future<void>? _scanInFlight;
+  // Runs from the moment the last scan released the radio. awaitRadioSettled
+  // measures the settle from here, so the pause applies whether the scan ended
+  // on its own timeout or was preempted by the connect claiming the link.
+  final Stopwatch _radioFreedAt = Stopwatch();
   Completer<void>? _scanPhaseInterrupt;
   static const Duration _scanGraceWindow = Duration(seconds: 5);
   Timer? _scanGraceTimer;
@@ -222,7 +238,15 @@ class FlipperClient {
 
   Future<List<FlipperDevice>> refreshDevices({
     Duration bleTimeout = const Duration(seconds: 10),
-  }) async {
+  }) {
+    final epoch = _scanEpoch;
+    return _enqueue(() => _refreshDevicesLocked(epoch, bleTimeout));
+  }
+
+  Future<List<FlipperDevice>> _refreshDevicesLocked(
+    int epoch,
+    Duration bleTimeout,
+  ) async {
     _devices.clear();
     for (final session in _sessions.values) {
       if (session.isConnected || session.isConnecting) {
@@ -231,7 +255,7 @@ class FlipperClient {
     }
     await _loadUsbDevices();
     _emitDevices(immediate: true);
-    await scanBle(timeout: bleTimeout);
+    await _scanPhase(epoch, bleTimeout);
     return devices;
   }
 
@@ -241,9 +265,28 @@ class FlipperClient {
     return refreshDevices(bleTimeout: bleTimeout);
   }
 
-  Future<void> scanBle({Duration timeout = const Duration(seconds: 10)}) async {
-    if (_scanning) return;
+  Future<void> scanBle({Duration timeout = const Duration(seconds: 10)}) {
+    final epoch = _scanEpoch;
+    return _enqueue(() => _scanPhase(epoch, timeout));
+  }
+
+  // Publishes the running phase for stopScan and drops a scan whose epoch was
+  // cancelled while it waited its turn on the chain.
+  Future<void> _scanPhase(int epoch, Duration timeout) {
+    if (epoch != _scanEpoch) {
+      Log.info('[BLE] scan cancelled before start');
+      return Future<void>.value();
+    }
+    final phase = _scanBleLocked(_scanEpoch, timeout);
+    _scanInFlight = phase;
+    return phase.whenComplete(() {
+      if (identical(_scanInFlight, phase)) _scanInFlight = null;
+    });
+  }
+
+  Future<void> _scanBleLocked(int epoch, Duration timeout) async {
     _scanning = true;
+    var heldRadio = false;
 
     try {
       if (_scanBlocked) {
@@ -282,9 +325,14 @@ class FlipperClient {
           ),
         ),
       );
+      heldRadio = true;
       await _loadKnownBleDevices();
       try {
         final interrupt = _scanPhaseInterrupt = Completer<void>();
+        // stopScan may have landed while the radio was still starting up, with
+        // no completer to fire yet: the epoch carries that cancellation here so
+        // the phase does not sit out its full timeout.
+        if (epoch != _scanEpoch) fireOnce(interrupt);
         await Future.any([Future.delayed(timeout), interrupt.future]);
         if (identical(_scanPhaseInterrupt, interrupt)) {
           _scanPhaseInterrupt = null;
@@ -297,17 +345,39 @@ class FlipperClient {
       }
     } finally {
       _scanning = false;
+      if (heldRadio) {
+        _radioFreedAt
+          ..reset()
+          ..start();
+      }
       _emitDevices(immediate: true);
     }
   }
 
+  /// Ends scanning: cancels scans still queued behind the lifecycle chain and
+  /// waits for a running phase to actually release the radio.
   Future<void> stopScan() async {
-    if (!_scanning) return;
+    _preemptScans();
+    await _scanInFlight;
+  }
+
+  /// Waits out [radioSettle] from the moment the last scan released the radio.
+  /// Returns immediately when no scan has run since the last settle.
+  Future<void> awaitRadioSettled() async {
+    if (!_radioFreedAt.isRunning) return;
+    final remaining = radioSettle - _radioFreedAt.elapsed;
+    _radioFreedAt
+      ..stop()
+      ..reset();
+    if (remaining > Duration.zero) await Future<void>.delayed(remaining);
+  }
+
+  // Collapses the waiting part of a running scan and invalidates any scan still
+  // queued on the chain, so whoever asked for the radio next gets it instead of
+  // sitting through a scan timeout.
+  void _preemptScans() {
+    _scanEpoch++;
     _interruptScanPhase();
-    await uble.UniversalBle.stopScan();
-    uble.UniversalBle.onScanResult = null;
-    _scanning = false;
-    _emitDevices(immediate: true);
   }
 
   void _armScanGrace() {
@@ -786,9 +856,19 @@ class FlipperClient {
     _maybeStopUsbPresenceWatch();
   }
 
-  // Appends a lifecycle operation to the chain. The chain never breaks: a
-  // failed operation surfaces its error to its own caller only.
+  // Appends a lifecycle operation to the chain. Scanning runs on the same
+  // chain, so a scan phase and a connect can never overlap on the radio; the
+  // waiting part of a scan is collapsed up front so the queued operation does
+  // not sit behind the full scan timeout.
   Future<T> serialized<T>(Future<T> Function() op) {
+    _preemptScans();
+    return _enqueue(op);
+  }
+
+  // Chain append without the scan preemption — scans enqueue through this so
+  // they do not cut their own phase short. The chain never breaks: a failed
+  // operation surfaces its error to its own caller only.
+  Future<T> _enqueue<T>(Future<T> Function() op) {
     final result = _lifecycleChain.then((_) => op());
     _lifecycleChain = result.then<void>((_) {}, onError: (_) {});
     return result;
