@@ -879,7 +879,7 @@ class FlipperSession {
     unawaited(_runWorker(gen));
   }
 
-  QueuedRequest? _dequeueNext() {
+  QueuedRequest? _peekNext() {
     if (_requestQueue.isEmpty) return null;
     final lockedId = _txGroupCommandId;
     if (lockedId != null) {
@@ -887,10 +887,19 @@ class FlipperSession {
         (r) => r.frame.commandId == lockedId || r.interleavable,
       );
       if (idx < 0) return null;
-      return _requestQueue.removeAt(idx);
+      return _requestQueue[idx];
     }
-    return _requestQueue.removeAt(0);
+    return _requestQueue.first;
   }
+
+  QueuedRequest? _dequeueNext() {
+    final request = _peekNext();
+    if (request != null) _requestQueue.remove(request);
+    return request;
+  }
+
+  bool _isBatchable(QueuedRequest request) =>
+      !request.frame.hasNext && !request.holdsTxUntilAnswer;
 
   bool _hasDispatchableRequest() {
     if (_requestQueue.isEmpty) return false;
@@ -925,7 +934,21 @@ class FlipperSession {
       }
 
       final frame = request.frame;
-      final encoded = RpcProtocol.encode(frame);
+      final batch = <QueuedRequest>[request];
+      final builder = BytesBuilder(copy: false)..add(RpcProtocol.encode(frame));
+      final batchLimit = transport.maxWriteBatchSize;
+      if (_isBatchable(request)) {
+        while (builder.length < batchLimit) {
+          final next = _peekNext();
+          if (next == null || !_isBatchable(next)) break;
+          final nextEncoded = RpcProtocol.encode(next.frame);
+          if (builder.length + nextEncoded.length > batchLimit) break;
+          _requestQueue.remove(next);
+          builder.add(nextEncoded);
+          batch.add(next);
+        }
+      }
+      final encoded = builder.takeBytes();
       _activeRequest = request;
 
       Object? writeError;
@@ -936,40 +959,50 @@ class FlipperSession {
       }
       if (gen != _sessionGen) {
         // Session ended while writing; teardown already failed the pending
-        // state, settle the queue entry.
-        request.fail(writeError ?? StateError('Disconnected'));
+        // state, settle the queue entries.
+        for (final queued in batch) {
+          queued.fail(writeError ?? StateError('Disconnected'));
+        }
         break;
       }
       if (writeError != null) {
         Log.error('[RPC] tx failed ${request.describe()}: $writeError');
         _activeRequest = null;
         _releaseTxGroup(frame.commandId);
-        request.fail(
-          FlipperTransportError(
-            'RPC write failed for ${request.describe()}: $writeError',
-          ),
-        );
+        for (final queued in batch) {
+          queued.fail(
+            FlipperTransportError(
+              'RPC write failed for ${queued.describe()}: $writeError',
+            ),
+          );
+        }
         // A dead transport announces itself through its done event, which
         // schedules the teardown.
         continue;
       }
       if (Log.debugOn) {
-        Log.debug('[RPC] tx ok ${request.describe()} bytes=${encoded.length}');
+        Log.debug(
+          '[RPC] tx ok ${request.describe()} bytes=${encoded.length}'
+          '${batch.length > 1 ? ' batched=${batch.length}' : ''}',
+        );
       }
 
       if (frame.commandId != 0 && frame.hasNext) {
         _txGroupCommandId = frame.commandId;
       }
-      request.markSent();
+      for (final queued in batch) {
+        queued.markSent();
+      }
 
-      if (frame.commandId != 0 && !frame.hasNext) {
-        _releaseTxGroup(frame.commandId);
-        if (request.holdsTxUntilAnswer) {
-          final pending = _pendingRpc[frame.commandId];
-          if (pending != null) {
-            // Settles on response, timeout or teardown — never hangs.
-            await pending.settled;
-          }
+      for (final queued in batch) {
+        final queuedFrame = queued.frame;
+        if (queuedFrame.commandId == 0 || queuedFrame.hasNext) continue;
+        _releaseTxGroup(queuedFrame.commandId);
+        if (!queued.holdsTxUntilAnswer) continue;
+        final pending = _pendingRpc[queuedFrame.commandId];
+        if (pending != null) {
+          // Settles on response, timeout or teardown — never hangs.
+          await pending.settled;
         }
       }
       if (identical(_activeRequest, request)) _activeRequest = null;

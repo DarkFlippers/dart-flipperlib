@@ -334,6 +334,9 @@ abstract class UniversalBleTransportBase extends Transport {
   FlipperMode get initialMode => FlipperMode.rpc;
 
   @override
+  int get maxWriteBatchSize => bleMtuSize;
+
+  @override
   Future<void> open() async {
     _connectionOwner = this;
     _registerDispatch();

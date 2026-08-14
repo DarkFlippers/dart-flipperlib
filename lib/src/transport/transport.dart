@@ -74,6 +74,8 @@ abstract class Transport {
 
   int get storageChunkSize => bleChunkSize;
 
+  int get maxWriteBatchSize => bleChunkSize;
+
   Future<void> open();
 
   Future<void> write(Uint8List bytes) {
