@@ -257,8 +257,6 @@ class FlipperClient {
         return;
       }
 
-      await _loadKnownBleDevices();
-
       uble.UniversalBle.onScanResult = (device) {
         final discovered = BleDiscoveredDevice(device);
         if (Log.debugOn) {
@@ -275,7 +273,16 @@ class FlipperClient {
       // is name/service based (includeDevice), so the UI filter can also
       // reveal non-Flipper devices on demand.
       Log.info('[BLE] scan started');
-      await uble.UniversalBle.startScan();
+      await uble.UniversalBle.startScan(
+        platformConfig: uble.PlatformConfig(
+          android: uble.AndroidOptions(
+            scanMode: uble.AndroidScanMode.lowLatency,
+            matchMode: uble.AndroidScanMatchMode.aggressive,
+            numOfMatches: uble.AndroidScanNumOfMatches.max,
+          ),
+        ),
+      );
+      await _loadKnownBleDevices();
       try {
         final interrupt = _scanPhaseInterrupt = Completer<void>();
         await Future.any([Future.delayed(timeout), interrupt.future]);

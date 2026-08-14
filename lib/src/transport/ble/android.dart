@@ -13,7 +13,9 @@ class AndroidBlePlatform extends UniversalBlePlatformBase {
   @override
   Future<void> requestPermissions() async {
     try {
-      await uble.UniversalBle.requestPermissions(withAndroidFineLocation: true);
+      await uble.UniversalBle.requestPermissions(
+        withAndroidFineLocation: false,
+      );
     } catch (e) {
       Log.error('[FlipperClient] Android BLE permission request failed: $e');
     }
