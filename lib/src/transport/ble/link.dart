@@ -19,10 +19,12 @@ abstract class UniversalBleTransportBase extends Transport {
   // initial flow-control credit to assume when the first credit read races ahead
   // of that grant and returns 0.
   static const int _rpcBufferSize = 1024;
-  // DO NOT CHANGE: 160 is the empirically stable ATT write payload for this
-  // firmware. Raising it toward the 411-byte ATT_MTU ceiling makes link drops
-  // far more frequent.
-  static const int maxBleMtuSize = 160;
+  // The firmware's ATT_MTU ceiling (CFG_BLE_MAX_ATT_MTU = 414, app_conf.h)
+  // minus the 3-byte ATT write header. Never write more than this in a single
+  // ATT operation: the platform would silently fall back to a long write
+  // (prepare/execute), which this firmware handles far worse. The negotiated
+  // MTU is therefore clamped here instead of being trusted.
+  static const int maxBleMtuSize = 411;
   // Bound for the unencrypted GATT setup steps (MTU negotiation, service
   // discovery).
   static const Duration _gattOpTimeout = Duration(seconds: 15);
@@ -103,6 +105,13 @@ abstract class UniversalBleTransportBase extends Transport {
 
   final List<BlePendingSend> _txQueue = [];
   Completer<void>? _txDataSignal;
+  // Bytes accepted from the RPC layer that have not reached the air yet, and
+  // the ceiling that back-pressures rawWrite. One firmware credit window is
+  // exactly what the sender may coalesce in a single cycle, so queueing more
+  // would buy nothing but memory.
+  static const int _txWindowSize = _rpcBufferSize;
+  int _txQueuedBytes = 0;
+  Completer<void>? _txSpaceSignal;
 
   // Flow-control credit mirror. _budgetGen detects that a fresh authoritative
   // credit notification arrived while a write was in flight.
@@ -332,9 +341,6 @@ abstract class UniversalBleTransportBase extends Transport {
 
   @override
   FlipperMode get initialMode => FlipperMode.rpc;
-
-  @override
-  int get maxWriteBatchSize => bleMtuSize;
 
   @override
   Future<void> open() async {
@@ -848,21 +854,43 @@ abstract class UniversalBleTransportBase extends Transport {
   }
 
   @override
-  Future<void> rawWrite(Uint8List bytes) {
+  Future<void> rawWrite(Uint8List bytes) async {
     if (!isActive) {
-      return Future.error(StateError('BLE transport closed'));
+      throw StateError('BLE transport closed');
     }
-    if (bytes.isEmpty) return Future.value();
+    if (bytes.isEmpty) return;
 
-    // Resolves only after the complete frame crossed every overflow-credit
-    // boundary, keeping the RPC worker blocked until then.
-    final pending = BlePendingSend(bytes);
-    _txQueue.add(pending);
+    // Resolves once the frame is accepted into the TX window, not once it is
+    // on the air: the sender then has several frames queued and can coalesce
+    // them into full-MTU ATT writes instead of trailing a short write per
+    // frame. The window itself is the back-pressure — a full one parks the
+    // caller here until the sender drains it. A write that fails after this
+    // point takes the whole link down (onTransportFault), which fails every
+    // pending RPC anyway, so no caller loses an error by returning early.
+    while (isActive && _txQueuedBytes >= _txWindowSize) {
+      final signal = _txSpaceSignal ??= Completer<void>();
+      await signal.future;
+    }
+    if (!isActive) {
+      throw StateError('BLE transport closed');
+    }
+
+    _txQueue.add(BlePendingSend(bytes));
+    _txQueuedBytes += bytes.length;
     final signal = _txDataSignal;
     _txDataSignal = null;
     fireOnce(signal);
     _startSender();
-    return pending.future;
+  }
+
+  // Marks [count] queued bytes as gone from the window and wakes a rawWrite
+  // parked on it.
+  void _releaseTxBytes(int count) {
+    _txQueuedBytes -= count;
+    if (_txQueuedBytes < 0) _txQueuedBytes = 0;
+    final signal = _txSpaceSignal;
+    _txSpaceSignal = null;
+    fireOnce(signal);
   }
 
   void _startSender() {
@@ -954,15 +982,42 @@ abstract class UniversalBleTransportBase extends Transport {
         if (!arrived || _txQueue.isEmpty) break;
       }
 
-      final pending = _txQueue.first;
-      final sendLength = pending.remainingLength < cycleRemaining
-          ? pending.remainingLength
-          : cycleRemaining;
-      final sendEnd = pending.offset + sendLength;
-      try {
-        await _sendMessage(
-          Uint8List.sublistView(pending.bytes, pending.offset, sendEnd),
+      // Coalesce as many queued frames as the remaining credit allows into one
+      // buffer: a frame boundary must not cost an ATT write of its own, which
+      // is what made every 512-byte RPC chunk end in a short round trip.
+      final chunks = <Uint8List>[];
+      var sendLength = 0;
+      for (final pending in _txQueue) {
+        final room = cycleRemaining - sendLength;
+        if (room <= 0) break;
+        final take = pending.remainingLength < room
+            ? pending.remainingLength
+            : room;
+        chunks.add(
+          Uint8List.sublistView(
+            pending.bytes,
+            pending.offset,
+            pending.offset + take,
+          ),
         );
+        sendLength += take;
+      }
+      if (chunks.isEmpty) break;
+
+      final Uint8List batch;
+      if (chunks.length == 1) {
+        batch = chunks.first;
+      } else {
+        batch = Uint8List(sendLength);
+        var at = 0;
+        for (final chunk in chunks) {
+          batch.setRange(at, at + chunk.length, chunk);
+          at += chunk.length;
+        }
+      }
+
+      try {
+        await _sendMessage(batch);
       } catch (e) {
         if (isActive) {
           onTransportFault(FlipperTransportError('BLE write failed: $e'));
@@ -970,16 +1025,20 @@ abstract class UniversalBleTransportBase extends Transport {
         return;
       }
 
-      pending.offset = sendEnd;
-      cycleRemaining -= sendLength;
-      if (pending.offset == pending.bytes.length) {
-        // _failAllPending (called from onFaultExtra during the await above) may
-        // have cleared _txQueue; guard before removeAt to avoid RangeError.
-        if (_txQueue.isNotEmpty && identical(pending, _txQueue.first)) {
-          _txQueue.removeAt(0);
-        }
-        pending.complete();
+      // _failAllPending (called from onFaultExtra during the await above) may
+      // have cleared _txQueue; advance only over what is still queued.
+      var consumed = sendLength;
+      while (consumed > 0 && _txQueue.isNotEmpty) {
+        final pending = _txQueue.first;
+        final take = pending.remainingLength < consumed
+            ? pending.remainingLength
+            : consumed;
+        pending.offset += take;
+        consumed -= take;
+        if (pending.remainingLength == 0) _txQueue.removeAt(0);
       }
+      _releaseTxBytes(sendLength);
+      cycleRemaining -= sendLength;
       // A fresh credit notification is authoritative: it already accounts for
       // everything sent so far, so the old cycle's remainder must be dropped.
       if (_budgetGen != cycleGen) return;
@@ -1049,28 +1108,34 @@ abstract class UniversalBleTransportBase extends Transport {
   }
 
   void _releaseSenderSignals() {
-    final signals = [_budgetSignal, _txDataSignal, _rpcActiveSignal];
+    final signals = [
+      _budgetSignal,
+      _txDataSignal,
+      _rpcActiveSignal,
+      _txSpaceSignal,
+    ];
     _budgetSignal = null;
     _txDataSignal = null;
     _rpcActiveSignal = null;
+    _txSpaceSignal = null;
     for (final signal in signals) {
       fireOnce(signal);
     }
   }
 
-  void _failAllPending(Object error) {
-    final pendings = List<BlePendingSend>.from(_txQueue);
+  // Drops everything still waiting in the TX window. The frames are not failed
+  // individually: rawWrite already handed them back to the RPC layer, and the
+  // fault that got us here fails every pending RPC.
+  void _dropQueuedWrites() {
     _txQueue.clear();
-    for (final p in pendings) {
-      p.fail(error);
-    }
+    _txQueuedBytes = 0;
   }
 
   @override
   void onFaultExtra(Object error) {
     fireOnce(_setupGuard);
+    _dropQueuedWrites();
     _releaseSenderSignals();
-    _failAllPending(error);
     _markBleDisconnected();
     _clearBleCallbacks();
   }
@@ -1087,8 +1152,8 @@ abstract class UniversalBleTransportBase extends Transport {
     // A close() racing an in-flight open() (e.g. a superseded attempt) must
     // unblock its setup awaits too, not just fault-driven teardown.
     fireOnce(_setupGuard);
+    _dropQueuedWrites();
     _releaseSenderSignals();
-    _failAllPending(StateError('BLE transport closed'));
     if (!identical(_connectionOwner, this)) {
       Log.info(
         '[BLE] stale transport closed without platform disconnect '
@@ -1187,18 +1252,7 @@ enum BleLinkState { disconnected, established, connected, disconnecting }
 class BlePendingSend {
   BlePendingSend(this.bytes);
   final Uint8List bytes;
-  final Completer<void> _completer = Completer<void>();
   int offset = 0;
 
-  Future<void> get future => _completer.future;
-
   int get remainingLength => bytes.length - offset;
-
-  void complete() {
-    if (!_completer.isCompleted) _completer.complete();
-  }
-
-  void fail(Object error) {
-    if (!_completer.isCompleted) _completer.completeError(error);
-  }
 }

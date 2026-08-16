@@ -640,7 +640,7 @@ class FlipperSession {
     void Function()? onSent,
     bool retainFrames = true,
     bool interleavable = false,
-    bool pipelined = false,
+    bool pipelined = true,
   }) async {
     if (mode != FlipperMode.rpc) {
       await switchToRpcMode();
@@ -910,10 +910,13 @@ class FlipperSession {
     );
   }
 
-  // The only writer in RPC mode. One frame is on the wire at a time; after
-  // the final frame of a command the worker waits for the response — the
-  // firmware serializes RPC handlers anyway, and this keeps its 1024-byte
-  // input buffer from accumulating multiple commands.
+  // The only writer in RPC mode. Commands are pipelined by default: the worker
+  // hands a frame to the transport and moves on, so several commands are in
+  // flight at once and the firmware answers each by commandId. The firmware's
+  // 1024-byte input buffer is protected by the transport's flow-control credit,
+  // not by waiting here. A caller that must not overlap with the next command
+  // (pipelined: false) still parks the worker on its answer, and multi-frame
+  // commands keep the TX group locked until their final frame.
   Future<void> _runWorker(int gen) async {
     while (gen == _sessionGen) {
       final transport = this.transport;

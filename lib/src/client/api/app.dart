@@ -6,6 +6,10 @@ import '../../model/enums.dart';
 import '../client.dart';
 
 extension FlipperAppApi on FlipperClient {
+  // appStart/appExit/appLoadFile opt out of TX pipelining: the firmware's app
+  // RPC handler accepts exactly one of them at a time and furi_check()s (i.e.
+  // crashes the Flipper) on a second one that arrives before the first is
+  // answered. The TX queue must hold them back, not just the callers.
   Future<List<Main>> appStart(
     StartRequest request, {
     Duration timeout = const Duration(seconds: 8),
@@ -15,6 +19,7 @@ extension FlipperAppApi on FlipperClient {
       Main(appStartRequest: request),
       timeout: timeout,
       priority: priority,
+      pipelined: false,
     );
   }
 
@@ -40,6 +45,7 @@ extension FlipperAppApi on FlipperClient {
       Main(appExitRequest: request),
       timeout: timeout,
       priority: priority,
+      pipelined: false,
     );
   }
 
@@ -52,6 +58,7 @@ extension FlipperAppApi on FlipperClient {
       Main(appLoadFileRequest: request),
       timeout: timeout,
       priority: priority,
+      pipelined: false,
     );
   }
 

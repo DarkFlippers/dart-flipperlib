@@ -949,7 +949,7 @@ class FlipperClient {
     void Function()? onSent,
     bool retainFrames = true,
     bool interleavable = false,
-    bool pipelined = false,
+    bool pipelined = true,
   }) {
     return _requireActiveSession().callRpcFrames(
       request,
