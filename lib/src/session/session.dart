@@ -55,6 +55,7 @@ class FlipperSession {
   Future<void>? _switchToRpcFuture;
   Future<void>? _deviceInfoFetch;
   bool cliExclusive = false;
+  bool _autoRpc = true;
   bool deviceInfoFetched = false;
   int _rxParseErrorStreak = 0;
   Future<void> _cliChain = Future.value();
@@ -112,6 +113,7 @@ class FlipperSession {
   // chain; _reconnectLocked keeps the queue and the device-info cache alive
   // across re-establishment.
   Future<FlipperDevice> establishLocked({bool autoRpc = true}) async {
+    _autoRpc = autoRpc;
     // A running scan competes with the connection for the radio. stopScan
     // returns once the platform scan is torn down; the settle then lets the
     // radio come free before the link is claimed.
@@ -307,7 +309,7 @@ class FlipperSession {
     if (settleGen != _sessionGen) return;
 
     try {
-      await establishLocked();
+      await establishLocked(autoRpc: _autoRpc);
     } catch (error) {
       Log.error('[FlipperClient] reconnect failed: $error');
       await teardownLocked(reason);

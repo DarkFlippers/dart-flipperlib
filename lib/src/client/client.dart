@@ -59,6 +59,7 @@ class FlipperClient {
 
   Future<void> _lifecycleChain = Future.value();
   bool autoReconnect = true;
+  bool _cliExclusive = false;
 
   StreamSubscription<void>? _usbPresenceSub;
 
@@ -180,9 +181,10 @@ class FlipperClient {
 
   bool get storageBusy => _active?.storageBusy ?? false;
 
-  bool get cliExclusive => _active?.cliExclusive ?? false;
+  bool get cliExclusive => _cliExclusive;
 
   set cliExclusive(bool value) {
+    _cliExclusive = value;
     _active?.cliExclusive = value;
   }
 
@@ -562,10 +564,13 @@ class FlipperClient {
   /// Connects to [device] and makes its session the active one. An already
   /// connected session is reused (an instant swap); other live sessions are
   /// kept connected and warm.
-  Future<FlipperDevice> connect(FlipperDevice device) =>
-      serialized(() => _connectLocked(device));
+  Future<FlipperDevice> connect(FlipperDevice device, {bool autoRpc = true}) =>
+      serialized(() => _connectLocked(device, autoRpc: autoRpc));
 
-  Future<FlipperDevice> _connectLocked(FlipperDevice device) async {
+  Future<FlipperDevice> _connectLocked(
+    FlipperDevice device, {
+    bool autoRpc = true,
+  }) async {
     final key = _deviceKey(device);
     final existing = _sessions[key];
     if (existing != null) {
@@ -585,7 +590,7 @@ class FlipperClient {
     // visible on the public streams (and cancellable from the UI).
     _activateLocked(session);
     try {
-      await session.establishLocked();
+      await session.establishLocked(autoRpc: autoRpc);
     } catch (error) {
       _dropSessionLocked(session);
       _activateLocked(
@@ -695,6 +700,7 @@ class FlipperClient {
     _active = session;
     if (session != null) {
       session.activationStamp = ++_activationSeq;
+      session.cliExclusive = _cliExclusive;
       _activePipes.addAll([
         session.modeCtrl.stream.listen((event) {
           if (!modeCtrl.isClosed) modeCtrl.add(event);
