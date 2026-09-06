@@ -51,7 +51,7 @@ class _DfuStatus {
 }
 
 class DfuseDevice extends UsbDeviceBackend {
-  DfuseDevice(super.deviceAddress);
+  DfuseDevice(super.ref);
 
   /// Reports `(operation, percent 0..100)` during long transfers.
   void Function(DfuseOperation op, double percent)? onProgress;

@@ -1,9 +1,10 @@
 // Minimal hand-written FFI bindings for libusb 1.0 — only the subset the DfuSe
 // recovery layer needs (device enumeration, control transfers, alt settings,
-// config/string descriptors). Deliberately not generated: keeps us on the
-// project's `ffi ^2.x` (the pub `libusb` package is pinned to ffi 1.x) and free
-// of an extra dependency. The native dylib is vendored by the macOS plugin
-// (see flipperlib.podspec) and resolved at runtime via @rpath.
+// config/string descriptors, wrapping an externally opened descriptor).
+// Deliberately not generated: keeps us on the project's `ffi ^2.x` (the pub
+// `libusb` package is pinned to ffi 1.x) and free of an extra dependency. The
+// native library is built from src/libusb on macOS (CocoaPods, see
+// flipperlib.podspec), Windows and Android, and taken from the system on Linux.
 //
 // Struct layouts mirror libusb.h on 64-bit; field order/types are chosen so the
 // ffi-computed size and alignment match the C ABI.
@@ -11,6 +12,8 @@ import 'dart:ffi';
 import 'dart:io';
 
 import 'package:ffi/ffi.dart';
+
+import '../../common/log.dart';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -24,6 +27,13 @@ const int libusbRecipientInterface = 0x01;
 
 /// libusb_error values we care about.
 const int libusbSuccess = 0;
+const int libusbErrorAccess = -3;
+const int libusbErrorNoDevice = -4;
+const int libusbErrorNotSupported = -12;
+
+/// libusb_option: skip bus enumeration so libusb_init works without access to
+/// /dev/bus/usb (Android); devices are then opened via libusb_wrap_sys_device.
+const int libusbOptionNoDeviceDiscovery = 2;
 
 // ── Opaque handles ───────────────────────────────────────────────────────────
 
@@ -97,6 +107,18 @@ final class LibusbInterface extends Struct {
   external int numAltsetting;
 }
 
+final class LibusbInitOptionValue extends Union {
+  @Int32()
+  external int ival;
+  external Pointer<Void> logCb;
+}
+
+final class LibusbInitOption extends Struct {
+  @Int32()
+  external int option;
+  external LibusbInitOptionValue value;
+}
+
 final class LibusbConfigDescriptor extends Struct {
   @Uint8()
   external int bLength;
@@ -125,8 +147,39 @@ final class LibusbConfigDescriptor extends Struct {
 typedef _InitNative = Int32 Function(Pointer<Pointer<LibusbContext>>);
 typedef LibusbInit = int Function(Pointer<Pointer<LibusbContext>>);
 
+typedef _InitContextNative =
+    Int32 Function(
+      Pointer<Pointer<LibusbContext>>,
+      Pointer<LibusbInitOption>,
+      Int32,
+    );
+typedef LibusbInitContext =
+    int Function(
+      Pointer<Pointer<LibusbContext>>,
+      Pointer<LibusbInitOption>,
+      int,
+    );
+
 typedef _ExitNative = Void Function(Pointer<LibusbContext>);
 typedef LibusbExit = void Function(Pointer<LibusbContext>);
+
+typedef _WrapSysDeviceNative =
+    Int32 Function(
+      Pointer<LibusbContext>,
+      IntPtr,
+      Pointer<Pointer<LibusbDeviceHandle>>,
+    );
+typedef LibusbWrapSysDevice =
+    int Function(
+      Pointer<LibusbContext>,
+      int,
+      Pointer<Pointer<LibusbDeviceHandle>>,
+    );
+
+typedef _GetDeviceNative =
+    Pointer<LibusbDevice> Function(Pointer<LibusbDeviceHandle>);
+typedef LibusbGetDevice =
+    Pointer<LibusbDevice> Function(Pointer<LibusbDeviceHandle>);
 
 typedef _GetDeviceListNative =
     IntPtr Function(
@@ -228,7 +281,17 @@ typedef LibusbUnrefDevice = void Function(Pointer<LibusbDevice>);
 class Libusb {
   Libusb._(this._lib) {
     init = _lib.lookupFunction<_InitNative, LibusbInit>('libusb_init');
+    initContext = _lib.lookupFunction<_InitContextNative, LibusbInitContext>(
+      'libusb_init_context',
+    );
     exit = _lib.lookupFunction<_ExitNative, LibusbExit>('libusb_exit');
+    wrapSysDevice = _lib
+        .lookupFunction<_WrapSysDeviceNative, LibusbWrapSysDevice>(
+          'libusb_wrap_sys_device',
+        );
+    getDevice = _lib.lookupFunction<_GetDeviceNative, LibusbGetDevice>(
+      'libusb_get_device',
+    );
     getDeviceList = _lib
         .lookupFunction<_GetDeviceListNative, LibusbGetDeviceList>(
           'libusb_get_device_list',
@@ -288,7 +351,10 @@ class Libusb {
   final DynamicLibrary _lib;
 
   late final LibusbInit init;
+  late final LibusbInitContext initContext;
   late final LibusbExit exit;
+  late final LibusbWrapSysDevice wrapSysDevice;
+  late final LibusbGetDevice getDevice;
   late final LibusbGetDeviceList getDeviceList;
   late final LibusbFreeDeviceList freeDeviceList;
   late final LibusbGetDeviceDescriptor getDeviceDescriptor;
@@ -318,9 +384,8 @@ class Libusb {
   static Libusb? _instance;
   static bool _unavailable = false;
 
-  /// Loads libusb once. Returns null when the platform has no vendored libusb
-  /// (so callers can degrade gracefully instead of crashing). Currently wired
-  /// for macOS/Linux/Windows desktop; Android USB-host is a separate backend.
+  /// Loads libusb once per isolate. Returns null when the platform has no
+  /// libusb build (so callers can degrade gracefully instead of crashing).
   static Libusb? get instance {
     if (_instance != null) return _instance;
     if (_unavailable) return null;
@@ -334,11 +399,9 @@ class Libusb {
 
   static DynamicLibrary? _tryLoad() {
     final candidates = <DynamicLibrary Function()>[
-      // Linked into the app (vendored_libraries) — symbols are already present.
-      () => DynamicLibrary.process(),
       if (Platform.isMacOS) ...[
-        () => DynamicLibrary.open('libusb-1.0.0.dylib'),
-        () => DynamicLibrary.open('@rpath/libusb-1.0.0.dylib'),
+        // Compiled into the flipperlib pod — symbols are already in the process.
+        () => DynamicLibrary.process(),
         () => DynamicLibrary.open(
           '/opt/homebrew/opt/libusb/lib/libusb-1.0.0.dylib',
         ),
@@ -349,7 +412,17 @@ class Libusb {
         () => DynamicLibrary.open('libusb-1.0.so.0'),
         () => DynamicLibrary.open('libusb-1.0.so'),
       ],
-      if (Platform.isWindows) () => DynamicLibrary.open('libusb-1.0.dll'),
+      if (Platform.isWindows) ...[
+        // The DLL built from src/libusb is installed next to the executable;
+        // load it by absolute path so a stray copy on PATH can not shadow it.
+        () => DynamicLibrary.open(
+          '${File(Platform.resolvedExecutable).parent.path}'
+          '${Platform.pathSeparator}libusb-1.0.dll',
+        ),
+        () => DynamicLibrary.open('libusb-1.0.dll'),
+      ],
+      // Built from src/libusb by the plugin's externalNativeBuild.
+      if (Platform.isAndroid) () => DynamicLibrary.open('libusb1.0.so'),
     ];
     for (final load in candidates) {
       try {
@@ -362,5 +435,48 @@ class Libusb {
       }
     }
     return null;
+  }
+}
+
+/// The isolate's libusb context. Created on first use; on Android it is
+/// initialised with LIBUSB_OPTION_NO_DEVICE_DISCOVERY because the bus can not
+/// be enumerated without root — devices arrive as descriptors from UsbManager
+/// and are attached with libusb_wrap_sys_device.
+abstract final class LibusbSession {
+  static Pointer<LibusbContext> _ctx = nullptr;
+  static bool _initFailed = false;
+
+  static Pointer<LibusbContext>? get context {
+    if (_ctx != nullptr) return _ctx;
+    if (_initFailed) return null;
+    final usb = Libusb.instance;
+    if (usb == null) {
+      _initFailed = true;
+      return null;
+    }
+    final out = malloc<Pointer<LibusbContext>>();
+    try {
+      final int err;
+      if (Platform.isAndroid) {
+        final options = calloc<LibusbInitOption>();
+        try {
+          options.ref.option = libusbOptionNoDeviceDiscovery;
+          err = usb.initContext(out, options, 1);
+        } finally {
+          calloc.free(options);
+        }
+      } else {
+        err = usb.init(out);
+      }
+      if (err != libusbSuccess) {
+        Log.error('[DFU] libusb_init failed: ${usb.errorString(err)}');
+        _initFailed = true;
+        return null;
+      }
+      _ctx = out.value;
+      return _ctx;
+    } finally {
+      malloc.free(out);
+    }
   }
 }

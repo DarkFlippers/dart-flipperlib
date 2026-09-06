@@ -28,6 +28,8 @@ flutter:
   plugin:
     platforms:
       android:
+        package: com.darkflippers.flipperlib
+        pluginClass: FlipperlibPlugin
         ffiPlugin: true
       ios:
         ffiPlugin: true

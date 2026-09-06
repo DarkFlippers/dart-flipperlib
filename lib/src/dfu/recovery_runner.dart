@@ -9,15 +9,24 @@
 // firmware, correct the option bytes, then leave DFU. Post-boot asset/region
 // provisioning is left to the normal RPC update flow once the device
 // re-enumerates.
+//
+// The host that finds and hands over the device is a DfuUsbBackend: libusb
+// enumeration inside this isolate on desktop, or a proxy to the main isolate's
+// Android host. Only the acquire / release / presence-wait seams await; every
+// transfer in between stays synchronous.
 import 'dart:async';
-import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
 
 import '../common/log.dart';
+import 'android_backend.dart';
+import 'backend.dart';
 import 'dfu_detector.dart';
 import 'dfuse_device.dart';
 import 'dfuse_file.dart';
+import 'isolate_proxy.dart';
+import 'libusb/libusb.dart';
+import 'libusb_host_backend.dart';
 import 'stm32wb55/fus_state.dart';
 import 'stm32wb55/option_bytes.dart';
 import 'stm32wb55/stm32wb55.dart';
@@ -121,15 +130,22 @@ class RecoveryDone extends RecoveryMessage {
   const RecoveryDone();
 }
 
+/// Why recovery stopped. [failure] is set when the host could not reach the
+/// device for a reason the user can act on (driver, permission); it is
+/// [DfuHostFailure.other] for protocol-level errors.
 class RecoveryFailed extends RecoveryMessage {
-  const RecoveryFailed(this.error);
+  const RecoveryFailed(this.error, [this.failure = DfuHostFailure.other]);
   final String error;
+  final DfuHostFailure failure;
 }
 
 class _RecoveryConfig {
-  _RecoveryConfig(this.sendPort, this.request);
+  _RecoveryConfig(this.sendPort, this.request, this.hostPort);
   final SendPort sendPort;
   final RecoveryRequest request;
+
+  /// Present when the host lives on the main isolate (Android).
+  final SendPort? hostPort;
 }
 
 /// Spawns the recovery isolate and surfaces its progress as a stream. The
@@ -139,10 +155,22 @@ Stream<RecoveryMessage> runRecovery(RecoveryRequest request) {
   final receivePort = ReceivePort();
   Isolate? isolate;
 
+  // On Android the host is bound to the main isolate's platform channels;
+  // serve it to the worker over a port. Desktop workers enumerate themselves.
+  final host = DfuUsb.host;
+  final DfuProxyServer? proxy = host is AndroidDfuBackend
+      ? DfuProxyServer(host)
+      : null;
+
+  void teardown() {
+    receivePort.close();
+    proxy?.close();
+  }
+
   void finish(RecoveryMessage message) {
     if (controller.isClosed) return;
     controller.add(message);
-    receivePort.close();
+    teardown();
     unawaited(controller.close());
   }
 
@@ -159,7 +187,7 @@ Stream<RecoveryMessage> runRecovery(RecoveryRequest request) {
   unawaited(
     Isolate.spawn(
       _recoveryIsolateEntry,
-      _RecoveryConfig(receivePort.sendPort, request),
+      _RecoveryConfig(receivePort.sendPort, request, proxy?.sendPort),
       errorsAreFatal: true,
       debugName: 'flipper-dfu-recovery',
     ).then<void>((spawned) => isolate = spawned).catchError((Object e) {
@@ -169,24 +197,38 @@ Stream<RecoveryMessage> runRecovery(RecoveryRequest request) {
 
   controller.onCancel = () {
     isolate?.kill(priority: Isolate.immediate);
-    receivePort.close();
+    teardown();
+    // A killed worker can not release its device; drop it on the host side so
+    // the descriptor is not left open under a dead libusb handle.
+    if (host is AndroidDfuBackend) unawaited(host.closeAll());
   };
   return controller.stream;
 }
 
-void _recoveryIsolateEntry(_RecoveryConfig cfg) {
+Future<void> _recoveryIsolateEntry(_RecoveryConfig cfg) async {
   final send = cfg.sendPort.send;
   try {
-    _runRecovery(cfg.request, send);
+    final hostPort = cfg.hostPort;
+    final DfuUsbBackend backend = hostPort != null
+        ? DfuProxyClient(hostPort)
+        : LibusbHostBackend();
+    await _runRecovery(cfg.request, backend, send);
     send(const RecoveryDone());
+  } on DfuHostException catch (e) {
+    Log.error('[Recovery] host failure: $e');
+    send(RecoveryFailed(e.message, e.failure));
   } catch (e, st) {
     Log.error('[Recovery] failed: $e\n$st');
     send(RecoveryFailed(e.toString()));
   }
 }
 
-void _runRecovery(RecoveryRequest req, void Function(Object) send) {
-  if (!DfuUsb.instance.available) {
+Future<void> _runRecovery(
+  RecoveryRequest req,
+  DfuUsbBackend backend,
+  void Function(Object) send,
+) async {
+  if (!backend.available || Libusb.instance == null) {
     throw StateError('Raw USB (libusb) is not available on this platform');
   }
 
@@ -201,7 +243,7 @@ void _runRecovery(RecoveryRequest req, void Function(Object) send) {
   // 1. Force recovery boot mode before touching flash. Writing option bytes
   //    resets and re-enumerates the device; the next transaction waits for it.
   send(const RecoveryProgress(RecoveryStep.settingBootMode, 0));
-  _withDevice('set recovery boot mode', (dev) {
+  await _withDevice(backend, 'set recovery boot mode', (dev) {
     final optionBytes = dev.optionBytes();
     if (!optionBytes.isValid) {
       throw StateError('Failed to read option bytes before recovery');
@@ -221,7 +263,7 @@ void _runRecovery(RecoveryRequest req, void Function(Object) send) {
     }
   });
   send(const RecoveryLog('Waiting for DFU device to re-enumerate'));
-  _waitForDfuCycle();
+  await _waitForDfuCycle(backend);
   send(const RecoveryProgress(RecoveryStep.settingBootMode, 100));
 
   // 2. Install the wireless (radio) stack through the FUS cycle, mirroring
@@ -231,7 +273,9 @@ void _runRecovery(RecoveryRequest req, void Function(Object) send) {
   final radioBin = req.radioBin;
   if (radioBin != null && radioBin.isNotEmpty) {
     try {
-      _flashWirelessStack(radioBin, req.radioAddress ?? 0, send);
+      await _flashWirelessStack(backend, radioBin, req.radioAddress ?? 0, send);
+    } on DfuHostException {
+      rethrow;
     } catch (e) {
       send(RecoveryLog('Radio flash failed ($e); continuing with firmware'));
     }
@@ -255,7 +299,7 @@ void _runRecovery(RecoveryRequest req, void Function(Object) send) {
   if (totalElements == 0) {
     throw StateError('Firmware .dfu has no image elements to flash');
   }
-  _withDevice('flash firmware', (dev) {
+  await _withDevice(backend, 'flash firmware', (dev) {
     dev.onProgress = (op, pct) => send(
       RecoveryProgress(
         RecoveryStep.flashingFirmware,
@@ -272,7 +316,7 @@ void _runRecovery(RecoveryRequest req, void Function(Object) send) {
   final reference = req.obReference;
   final compareMask = req.obCompareMask;
   final writeMask = req.obWriteMask;
-  _withDevice('correct option bytes', (dev) {
+  await _withDevice(backend, 'correct option bytes', (dev) {
     final current = dev.readOptionBytesRaw();
     if (current.length != OptionBytes.sizeBytes) {
       throw StateError('Failed to read option bytes after flashing');
@@ -352,22 +396,23 @@ const Duration _pollInterval = Duration(seconds: 1);
 // after 30 s; while it is present the poll loop waits indefinitely.
 const Duration _offlineTimeout = Duration(seconds: 30);
 
-void _flashWirelessStack(
+Future<void> _flashWirelessStack(
+  DfuUsbBackend backend,
   Uint8List radioBin,
   int addressOverride,
   void Function(Object) send,
-) {
+) async {
   var installTry = _installTryCount;
   while (true) {
-    _startFus(send);
-    _deleteWirelessStack(send);
-    _downloadWirelessStack(radioBin, addressOverride, send);
-    _upgradeWirelessStack(send);
+    await _startFus(backend, send);
+    await _deleteWirelessStack(backend, send);
+    await _downloadWirelessStack(backend, radioBin, addressOverride, send);
+    await _upgradeWirelessStack(backend, send);
 
     var ok = false;
     for (var i = 0; i < _checkTryCount && !ok; i++) {
-      sleep(_pollInterval);
-      ok = _checkWirelessStack(send);
+      await Future<void>.delayed(_pollInterval);
+      ok = await _checkWirelessStack(backend, send);
       if (!ok) {
         send(const RecoveryLog('Wireless stack check failed, retrying'));
       }
@@ -385,9 +430,12 @@ void _flashWirelessStack(
 // Recovery::startFUS. Both success paths reboot the device (leave, or the
 // second GET_STATE that actually boots FUS), so the caller must wait for
 // re-enumeration.
-void _startFus(void Function(Object) send) {
+Future<void> _startFus(
+  DfuUsbBackend backend,
+  void Function(Object) send,
+) async {
   send(const RecoveryLog('Starting firmware upgrade service (FUS)'));
-  _withDevice('start FUS', (dev) {
+  await _withDevice(backend, 'start FUS', (dev) {
     final state = dev.fusGetState();
     if (!state.isValid) {
       throw StateError('Failed to get FUS state');
@@ -406,17 +454,21 @@ void _startFus(void Function(Object) send) {
     }
   });
   send(const RecoveryLog('Waiting for the device to reboot into FUS'));
-  _waitForDfuCycle();
+  await _waitForDfuCycle(backend);
 }
 
-void _deleteWirelessStack(void Function(Object) send) {
+Future<void> _deleteWirelessStack(
+  DfuUsbBackend backend,
+  void Function(Object) send,
+) async {
   send(const RecoveryLog('Deleting old co-processor firmware'));
-  _withDevice('delete wireless stack', (dev) {
+  await _withDevice(backend, 'delete wireless stack', (dev) {
     if (!dev.fusFwDelete()) {
       throw StateError('Failed to send FW_DELETE command');
     }
   });
-  _waitForWireless(
+  await _waitForWireless(
+    backend,
     send,
     failOn: const {_WirelessStatus.wsRunning, _WirelessStatus.errorOccured},
     what: 'removal of the wireless stack',
@@ -425,13 +477,14 @@ void _deleteWirelessStack(void Function(Object) send) {
 
 // Recovery::downloadWirelessStack: with no override the image goes right below
 // the current secure-flash boundary, `(origin + 0x1000·SFSA − size) & ~0xFFF`.
-void _downloadWirelessStack(
+Future<void> _downloadWirelessStack(
+  DfuUsbBackend backend,
   Uint8List radioBin,
   int addressOverride,
   void Function(Object) send,
-) {
+) async {
   send(const RecoveryProgress(RecoveryStep.flashingRadio, 0));
-  _withDevice('flash radio', (dev) {
+  await _withDevice(backend, 'flash radio', (dev) {
     var addr = addressOverride;
     if (addr == 0) {
       final ob = dev.optionBytes();
@@ -470,25 +523,32 @@ void _downloadWirelessStack(
   });
 }
 
-void _upgradeWirelessStack(void Function(Object) send) {
+Future<void> _upgradeWirelessStack(
+  DfuUsbBackend backend,
+  void Function(Object) send,
+) async {
   send(const RecoveryLog('Sending FW_UPGRADE command'));
-  _withDevice('upgrade wireless stack', (dev) {
+  await _withDevice(backend, 'upgrade wireless stack', (dev) {
     if (!dev.fusFwUpgrade()) {
       throw StateError('Failed to send FW_UPGRADE command');
     }
   });
   // WSRunning is fine here: the freshly installed stack may auto-start.
-  _waitForWireless(
+  await _waitForWireless(
+    backend,
     send,
     failOn: const {_WirelessStatus.errorOccured},
     what: 'installation of the wireless stack',
   );
 }
 
-bool _checkWirelessStack(void Function(Object) send) {
-  final address = DfuUsb.instance.acquireDevice();
-  if (address == null) return false;
-  final dev = Stm32Wb55(address);
+Future<bool> _checkWirelessStack(
+  DfuUsbBackend backend,
+  void Function(Object) send,
+) async {
+  final ref = await backend.acquire();
+  if (ref == null) return false;
+  final dev = Stm32Wb55(ref);
   try {
     if (!dev.beginTransaction()) return false;
     final info = dev.versionInfo();
@@ -501,16 +561,17 @@ bool _checkWirelessStack(void Function(Object) send) {
     );
     return info.wirelessVersion != '0.0.0';
   } finally {
-    DfuUsb.instance.releaseDevice(address);
+    dev.close();
+    await backend.release(ref);
   }
 }
 
 // Recovery::wirelessStatus: any failure to reach the device or read a valid
 // state is Invalid, which the poll loops treat as "wait for the next tick".
-_WirelessStatus _wirelessStatus() {
-  final address = DfuUsb.instance.acquireDevice();
-  if (address == null) return _WirelessStatus.invalid;
-  final dev = Stm32Wb55(address);
+Future<_WirelessStatus> _wirelessStatus(DfuUsbBackend backend) async {
+  final ref = await backend.acquire();
+  if (ref == null) return _WirelessStatus.invalid;
+  final dev = Stm32Wb55(ref);
   try {
     if (!dev.beginTransaction()) return _WirelessStatus.invalid;
     final state = dev.fusGetState();
@@ -530,25 +591,27 @@ _WirelessStatus _wirelessStatus() {
       return _WirelessStatus.unhandledState;
     }
   } finally {
-    DfuUsb.instance.releaseDevice(address);
+    dev.close();
+    await backend.release(ref);
   }
 }
 
 // Port of the 1 s polling loops in WirelessStackDownloadOperation. Undecided
 // statuses keep waiting; the device disappearing for more than the operation
 // timeout fails the step. Returns on any decisive status not in [failOn].
-void _waitForWireless(
+Future<void> _waitForWireless(
+  DfuUsbBackend backend,
   void Function(Object) send, {
   required Set<_WirelessStatus> failOn,
   required String what,
-}) {
+}) async {
   DateTime? absentSince;
   while (true) {
-    sleep(_pollInterval);
-    final status = _wirelessStatus();
+    await Future<void>.delayed(_pollInterval);
+    final status = await _wirelessStatus(backend);
     if (status == _WirelessStatus.invalid ||
         status == _WirelessStatus.unhandledState) {
-      if (DfuUsb.instance.isPresent()) {
+      if (await backend.isPresent()) {
         absentSince = null;
       } else {
         absentSince ??= DateTime.now();
@@ -567,25 +630,27 @@ void _waitForWireless(
 
 // Waits out a reboot: first for the device to drop off the bus (bounded, in
 // case the cycle was missed), then for it to come back openable.
-void _waitForDfuCycle() {
-  final sw = Stopwatch()..start();
-  while (sw.elapsed < const Duration(seconds: 10)) {
-    if (!DfuUsb.instance.isPresent()) break;
-    sleep(const Duration(milliseconds: 100));
-  }
-  _waitForDfuReenumeration(timeout: const Duration(seconds: 30));
+Future<void> _waitForDfuCycle(DfuUsbBackend backend) async {
+  await backend.waitPresence(false, const Duration(seconds: 10));
+  await _waitForDfuReenumeration(backend, timeout: const Duration(seconds: 30));
 }
 
 // Acquires a DFU device, runs [body] inside an open transaction, and always
 // releases the device reference. Retries acquisition because the device
-// re-enumerates after the resets earlier steps trigger.
-void _withDevice(String what, void Function(Stm32Wb55 dev) body) {
+// re-enumerates after the resets earlier steps trigger. Order matters for the
+// Android host: the libusb handle is closed before the descriptor is handed
+// back, and the descriptor is handed back before the next acquire.
+Future<void> _withDevice(
+  DfuUsbBackend backend,
+  String what,
+  void Function(Stm32Wb55 dev) body,
+) async {
   Log.info('[Recovery] acquiring device for: $what');
-  final address = _acquireDevice();
-  final dev = Stm32Wb55(address);
+  final ref = await _acquireDevice(backend);
+  final dev = Stm32Wb55(ref);
   try {
     if (!dev.beginTransaction()) {
-      throw StateError('$what: failed to open DFU device');
+      throw _openFailure(what, dev.lastOpenError);
     }
     Log.info('[Recovery] transaction started: $what');
     try {
@@ -595,48 +660,79 @@ void _withDevice(String what, void Function(Stm32Wb55 dev) body) {
       Log.info('[Recovery] transaction ended: $what');
     }
   } finally {
-    DfuUsb.instance.releaseDevice(address);
+    dev.close();
+    await backend.release(ref);
   }
 }
 
-int _acquireDevice({Duration timeout = const Duration(seconds: 15)}) {
+Object _openFailure(String what, int libusbError) {
+  return switch (libusbError) {
+    libusbErrorNotSupported => DfuHostException(
+      DfuHostFailure.driverMissing,
+      '$what: the DFU device has no usable driver (libusb: not supported)',
+    ),
+    libusbErrorAccess => DfuHostException(
+      DfuHostFailure.accessDenied,
+      '$what: access to the DFU device was denied',
+    ),
+    _ => StateError('$what: failed to open DFU device'),
+  };
+}
+
+Future<DfuDeviceRef> _acquireDevice(
+  DfuUsbBackend backend, {
+  Duration timeout = const Duration(seconds: 15),
+}) async {
   final deadline = DateTime.now().add(timeout);
-  while (DateTime.now().isBefore(deadline)) {
-    final address = DfuUsb.instance.acquireDevice();
-    if (address != null) return address;
-    sleep(const Duration(milliseconds: 250));
+  while (true) {
+    final ref = await backend.acquire();
+    if (ref != null) return ref;
+    final remaining = deadline.difference(DateTime.now());
+    if (remaining.isNegative || !await backend.waitPresence(true, remaining)) {
+      throw StateError('DFU device not found within ${timeout.inSeconds}s');
+    }
   }
-  throw StateError('DFU device not found within ${timeout.inSeconds}s');
 }
 
-void _waitForDfuReenumeration({
+Future<void> _waitForDfuReenumeration(
+  DfuUsbBackend backend, {
   Duration timeout = const Duration(seconds: 15),
   Duration settleDelay = const Duration(milliseconds: 750),
-}) {
+}) async {
   final deadline = DateTime.now().add(timeout);
-  while (DateTime.now().isBefore(deadline)) {
-    if (DfuUsb.instance.isPresent()) {
-      sleep(settleDelay);
-      if (DfuUsb.instance.isPresent() && _canOpenDfuDevice()) return;
+  while (true) {
+    final remaining = deadline.difference(DateTime.now());
+    if (remaining.isNegative || !await backend.waitPresence(true, remaining)) {
+      break;
     }
-    sleep(const Duration(milliseconds: 100));
+    // Give the OS time to finish attaching the bootloader interface, then make
+    // sure the device is not only listed but openable.
+    await Future<void>.delayed(settleDelay);
+    if (await backend.isPresent() && await _canOpenDfuDevice(backend)) return;
+    if (!DateTime.now().isBefore(deadline)) break;
+    await Future<void>.delayed(const Duration(milliseconds: 100));
   }
   throw StateError(
     'DFU device did not become ready within ${timeout.inSeconds}s',
   );
 }
 
-bool _canOpenDfuDevice() {
-  final address = DfuUsb.instance.acquireDevice();
-  if (address == null) return false;
-  final dev = Stm32Wb55(address);
+Future<bool> _canOpenDfuDevice(DfuUsbBackend backend) async {
+  final ref = await backend.acquire();
+  if (ref == null) return false;
+  final dev = Stm32Wb55(ref);
   try {
-    if (!dev.beginTransaction()) return false;
+    if (!dev.beginTransaction()) {
+      // A device that is present but unreachable will not become reachable by
+      // waiting; report the cause right away instead of timing out.
+      final failure = _openFailure('open DFU device', dev.lastOpenError);
+      if (failure is DfuHostException) throw failure;
+      return false;
+    }
     dev.endTransaction();
     return true;
-  } catch (_) {
-    return false;
   } finally {
-    DfuUsb.instance.releaseDevice(address);
+    dev.close();
+    await backend.release(ref);
   }
 }

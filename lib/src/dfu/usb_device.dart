@@ -3,6 +3,11 @@
 // DfuSe layer above polls device status with blocking sleeps exactly like
 // qFlipper's worker thread, so every recovery flow that uses this backend must
 // run inside a dedicated isolate (never the UI isolate).
+//
+// The device arrives as a [DfuDeviceRef]: a referenced libusb_device* where
+// libusb enumerates the bus, or an already open file descriptor (Android) that
+// libusb_wrap_sys_device turns into a handle. From the handle on both paths are
+// identical.
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
@@ -10,20 +15,22 @@ import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 import '../common/log.dart';
+import 'backend.dart';
 import 'libusb/libusb.dart';
 
 class UsbDeviceBackend {
-  UsbDeviceBackend(this.device) : _usb = Libusb.instance! {
-    _device = Pointer<LibusbDevice>.fromAddress(device);
-  }
+  UsbDeviceBackend(this.ref) : _usb = Libusb.instance!;
 
-  /// The libusb_device pointer address (stable handle passed across the API and
-  /// into isolates).
-  final int device;
+  /// The host-reserved device this wrapper opens.
+  final DfuDeviceRef ref;
 
   final Libusb _usb;
-  late final Pointer<LibusbDevice> _device;
+  Pointer<LibusbDevice> _device = nullptr;
   Pointer<LibusbDeviceHandle> _handle = nullptr;
+
+  /// libusb error of the last failed [open], for the caller to classify
+  /// (driver missing vs. access denied); [libusbSuccess] otherwise.
+  int lastOpenError = libusbSuccess;
 
   /// Control-transfer timeout, mirrors qFlipper's `m_timeout`.
   int timeoutMs = 5000;
@@ -39,12 +46,27 @@ class UsbDeviceBackend {
     if (_handle != nullptr) return true;
     final out = malloc<Pointer<LibusbDeviceHandle>>();
     try {
-      final err = _usb.open(_device, out);
+      final int err;
+      switch (ref) {
+        case LibusbDeviceRef(:final address):
+          err = _usb.open(Pointer<LibusbDevice>.fromAddress(address), out);
+        case UsbFdDeviceRef(:final fd):
+          final ctx = LibusbSession.context;
+          if (ctx == null) {
+            lastOpenError = libusbErrorNotSupported;
+            Log.error('[DFU] libusb context unavailable');
+            return false;
+          }
+          err = _usb.wrapSysDevice(ctx, fd, out);
+      }
       if (err != libusbSuccess) {
-        Log.error('[DFU] libusb_open failed: ${_usb.errorString(err)}');
+        lastOpenError = err;
+        Log.error('[DFU] libusb open failed: ${_usb.errorString(err)}');
         return false;
       }
+      lastOpenError = libusbSuccess;
       _handle = out.value;
+      _device = _usb.getDevice(_handle);
       // Best-effort: lets us claim an interface the kernel may have bound.
       try {
         _usb.setAutoDetachKernelDriver(_handle, 1);
@@ -59,6 +81,7 @@ class UsbDeviceBackend {
     if (_handle == nullptr) return;
     _usb.close(_handle);
     _handle = nullptr;
+    _device = nullptr;
   }
 
   bool claimInterface(int interfaceNum) => _retry(

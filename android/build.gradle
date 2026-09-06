@@ -9,19 +9,36 @@ rootProject.allprojects {
 }
 
 apply plugin: "com.android.library"
+apply plugin: "org.jetbrains.kotlin.android"
 
 android {
     namespace = "com.darkflippers.flipperlib"
     compileSdk = 35
 
-    // No native code on Android: USB goes through usb_serial and BLE through
-    // universal_ble. The module exists so the plugin can declare Android support.
+    // Serial USB goes through usb_serial and BLE through universal_ble. This
+    // module owns raw-USB DFU / recovery: the Kotlin side hands a UsbManager
+    // file descriptor to Dart, which drives libusb (built here from the vendored
+    // sources) over it.
     defaultConfig {
         minSdk = 21
+    }
+
+    sourceSets {
+        main.java.srcDirs += "src/main/kotlin"
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = "../src/libusb/CMakeLists.txt"
+        }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
     }
 }

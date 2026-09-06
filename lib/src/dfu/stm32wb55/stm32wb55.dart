@@ -40,7 +40,7 @@ class WbVersionInfo {
 }
 
 class Stm32Wb55 extends DfuseDevice {
-  Stm32Wb55(super.deviceAddress);
+  Stm32Wb55(super.ref);
 
   OptionBytes optionBytes() {
     final data = upload(
