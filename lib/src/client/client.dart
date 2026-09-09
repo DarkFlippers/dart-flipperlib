@@ -59,6 +59,7 @@ class FlipperClient {
 
   Future<void> _lifecycleChain = Future.value();
   bool autoReconnect = true;
+  static const int maxSessions = 2;
   bool _cliExclusive = false;
 
   StreamSubscription<void>? _usbPresenceSub;
@@ -579,6 +580,11 @@ class FlipperClient {
         return existing.device;
       }
       _dropSessionLocked(existing);
+    }
+    if (_sessions.length >= maxSessions) {
+      throw StateError(
+        'Only $maxSessions links can be held at once; disconnect one first',
+      );
     }
     final previous = _active;
     final session = FlipperSession(this, device);
