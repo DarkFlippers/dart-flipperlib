@@ -434,7 +434,9 @@ class FlipperSession {
     Log.info('[RPC] RPC mode active');
   }
 
-  Future<void> switchToCliMode() => _client.serialized(_switchToCliLocked);
+  Future<void> switchToCliMode() => _client.serialized(switchToCliLocked);
+
+  Future<void> switchToCliLocked() => _switchToCliLocked();
 
   Future<void> _switchToCliLocked() async {
     if (!isConnected) {
@@ -526,6 +528,8 @@ class FlipperSession {
     }
     await transport.write(bytes);
   }
+
+  Future<void> ensureCliPromptLocked() => _ensureCliPrompt();
 
   Future<void> _ensureCliPrompt() async {
     final transport = _requireTransport();

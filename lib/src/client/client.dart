@@ -611,6 +611,77 @@ class FlipperClient {
     return session.device;
   }
 
+  Future<FlipperCliChannel> openCli(FlipperDevice device) {
+    return serialized(() async {
+      if (!device.isUsb) {
+        throw FlipperUnsupportedModeError(
+          'CLI mode is only available over USB',
+        );
+      }
+      final key = _deviceKey(device);
+      var session = _sessions[key];
+      final active = _active;
+      final keepActive =
+          active != null && !identical(active, session) && active.isConnected;
+      final backlog = StringBuffer();
+      StreamSubscription<String>? tap;
+      if (session == null || !(session.isConnected || session.isConnecting)) {
+        if (session != null) _dropSessionLocked(session);
+        if (_sessions.length >= maxSessions) {
+          throw StateError(
+            'Only $maxSessions links can be held at once; disconnect one first',
+          );
+        }
+        session = FlipperSession(this, device);
+        _sessions[key] = session;
+        _sessionWatches[session] = session.connectionCtrl.stream.listen(
+          (_) => _emitSessions(),
+        );
+        tap = session.textCtrl.stream.listen(backlog.write);
+        if (!keepActive) {
+          _cliExclusive = true;
+          _activateLocked(session);
+        }
+        session.cliExclusive = true;
+        try {
+          await session.establishLocked(autoRpc: false);
+          await session.ensureCliPromptLocked();
+        } catch (error) {
+          await tap.cancel();
+          session.cliExclusive = false;
+          if (!keepActive) _cliExclusive = false;
+          _dropSessionLocked(session);
+          if (!keepActive) _activateLocked(_mostRecentConnected());
+          rethrow;
+        }
+        _ensureUsbPresenceWatch();
+      } else if (session.mode != FlipperMode.cli) {
+        final isActive = identical(_active, session);
+        tap = session.textCtrl.stream.listen(backlog.write);
+        session.cliExclusive = true;
+        if (isActive) _cliExclusive = true;
+        try {
+          await session.switchToCliLocked();
+        } catch (error) {
+          await tap.cancel();
+          session.cliExclusive = false;
+          if (isActive) _cliExclusive = false;
+          rethrow;
+        }
+      } else {
+        session.cliExclusive = true;
+        if (identical(_active, session)) _cliExclusive = true;
+      }
+      final channel = FlipperCliChannel._(this, session, backlog.toString());
+      await tap?.cancel();
+      _emitSessions();
+      return channel;
+    });
+  }
+
+  bool isCliOpen(FlipperDevice device) =>
+      _sessions[_deviceKey(device)]?.mode == FlipperMode.cli;
+
   /// Instantly reroutes all API calls and public streams to the live session
   /// of [device] — no radio work. Throws when the device holds no session.
   Future<void> activate(FlipperDevice device) =>
@@ -706,7 +777,7 @@ class FlipperClient {
     _active = session;
     if (session != null) {
       session.activationStamp = ++_activationSeq;
-      session.cliExclusive = _cliExclusive;
+      _cliExclusive = session.cliExclusive;
       _activePipes.addAll([
         session.modeCtrl.stream.listen((event) {
           if (!modeCtrl.isClosed) modeCtrl.add(event);
@@ -1103,6 +1174,83 @@ class FlipperClient {
     await deviceInfoWatchCtrl.close();
     await storageMutationCtrl.close();
     await _sessionsCtrl.close();
+  }
+}
+
+class FlipperCliChannel {
+  FlipperCliChannel._(this._client, this._session, String backlog) {
+    if (backlog.isNotEmpty) _pending.write(backlog);
+    _textCtrl = StreamController<String>.broadcast(onListen: _flush);
+    _tap = _session.textCtrl.stream.listen((chunk) {
+      if (_textCtrl.hasListener) {
+        _textCtrl.add(chunk);
+      } else {
+        _pending.write(chunk);
+      }
+    });
+  }
+
+  final FlipperClient _client;
+  final FlipperSession _session;
+  final StringBuffer _pending = StringBuffer();
+  late final StreamController<String> _textCtrl;
+  StreamSubscription<String>? _tap;
+  bool _closed = false;
+
+  FlipperDevice get device => _session.device;
+
+  bool get isOpen =>
+      !_closed && _session.isConnected && _session.mode == FlipperMode.cli;
+
+  bool get pausesRpc => identical(_client._active, _session);
+
+  Stream<String> get text => _textCtrl.stream;
+
+  Stream<FlipperConnectionState> get connection =>
+      _session.connectionCtrl.stream;
+
+  Future<void> write(Uint8List bytes) => _session.writeCliBytes(bytes);
+
+  Future<void> writeText(String text) => _session.writeCliText(text);
+
+  Future<void> nudge() {
+    final transport = _session.transport;
+    if (transport == null) {
+      return Future.error(StateError('No active transport'));
+    }
+    return transport.nudgeCli();
+  }
+
+  void _flush() {
+    if (_pending.isEmpty) return;
+    final text = _pending.toString();
+    _pending.clear();
+    scheduleMicrotask(() {
+      if (!_textCtrl.isClosed) _textCtrl.add(text);
+    });
+  }
+
+  Future<void> close({bool backToRpc = true}) {
+    if (_closed) return Future.value();
+    _closed = true;
+    unawaited(_tap?.cancel());
+    _tap = null;
+    unawaited(_textCtrl.close());
+    return _client.serialized(() async {
+      _session.cliExclusive = false;
+      final isActive = identical(_client._active, _session);
+      if (isActive) _client._cliExclusive = false;
+      if (!_session.isConnected) return;
+      if (isActive) {
+        if (backToRpc && _session.transport != null) {
+          await _session.switchToRpcMode();
+        }
+      } else {
+        await _session.teardownLocked('cli channel closed');
+        _client._dropSessionLocked(_session);
+        _client._emitSessions();
+      }
+    });
   }
 }
 
