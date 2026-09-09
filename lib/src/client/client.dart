@@ -203,6 +203,9 @@ class FlipperClient {
 
   String? getName() => _active?.getName();
 
+  String? getNameOf(FlipperDevice device) =>
+      _findSession(device.id, link: device.link)?.getName();
+
   Future<String> awaitName() {
     final session = _active;
     if (session == null) {
