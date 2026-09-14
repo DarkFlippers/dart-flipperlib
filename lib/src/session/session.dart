@@ -362,7 +362,11 @@ class FlipperSession {
   }
 
   void _onTransportClosed(Transport transport) {
-    if (!identical(transport, transport)) return;
+    // A close belonging to a transport already replaced says nothing about the
+    // one we are on. _scheduleFaultRecovery is handed the live _sessionGen,
+    // not one captured when this subscription was made, so without the guard a
+    // stale onDone tears down the healthy session that replaced it.
+    if (!identical(transport, this.transport)) return;
     final reason = transport.closeReason ?? 'transport closed';
     final active = _activeRequest;
     final detailedReason = active == null
@@ -381,21 +385,53 @@ class FlipperSession {
       );
     }
     if (mode == FlipperMode.rpc) return Future.value();
-    return _switchToRpcFuture ??= _doSwitchToRpcMode().whenComplete(() {
-      _switchToRpcFuture = null;
+    final existing = _switchToRpcFuture;
+    if (existing != null) return existing;
+    // Cleared only when it is still ours. Cleared unconditionally - as it was
+    // - a switch that finishes late discards a newer one still running, and
+    // the next sender starts a third against the same transport: that one
+    // writes start_rpc_session as ASCII into a stream the second has already
+    // turned into protobuf, and clears the frame buffer under it.
+    //
+    // Only reachable since the guards in _doSwitchToRpcMode stopped a stale
+    // switch from declaring RPC mode anyway, which used to make the early
+    // return at the top of this method swallow the second switch.
+    //
+    // The memo holds the raw future and the caller gets the derived one, so
+    // the error still arrives where somebody is awaiting it. Handing the
+    // derived future to unawaited() instead leaves it with no listener at all,
+    // and _requireTransport throwing - which the callers at establishLocked
+    // and the RPC senders all expect and catch - would reach the zone instead.
+    final future = _doSwitchToRpcMode();
+    _switchToRpcFuture = future;
+    return future.whenComplete(() {
+      if (identical(_switchToRpcFuture, future)) _switchToRpcFuture = null;
     });
   }
 
   Future<void> _doSwitchToRpcMode() async {
-    // Strict on purpose: a real RPC sender (callRpcFrames / sendRpc switches
-    // here) must fail fast when there is no transport instead of enqueuing a
-    // request that can only time out. The lenient "already disconnected"
-    // handling lives in FlipperClient.enterRpcMode(), the mode-restore entry
-    // point.
+    // Strict on entry: a real RPC sender (callRpcFrames / sendRpc switches
+    // here) must fail fast when there is no transport at all, instead of
+    // enqueuing a request that can only time out. The lenient "already
+    // disconnected" handling lives in FlipperClient.enterRpcMode(), the
+    // mode-restore entry point.
+    //
+    // Strict on entry only. The guards below return rather than throw when the
+    // transport is swapped mid-handshake, because there the request should
+    // wait rather than fail: on a session opened with autoRpc, establishLocked
+    // starts a fresh switch on the new link and the worker dispatches the
+    // queue once that one lands.
+    //
+    // On a session opened for CLI it does not - _autoRpc is set once and never
+    // cleared - so switchToRpcMode can return with mode still cli, and the
+    // caller learns otherwise from the next request's own timeout rather than
+    // from here.
     final transport = _requireTransport();
     if (mode == FlipperMode.rpc) return;
     if (!transport.supportsCli) {
-      if (identical(transport, transport)) {
+      // Cheap today - nothing awaits above it - but the same shape as the
+      // guards further down, and it fails safe if one ever does.
+      if (identical(transport, this.transport)) {
         _setMode(FlipperMode.rpc);
         _signalWorker();
       }
@@ -412,7 +448,11 @@ class FlipperSession {
           ? '[RPC] CLI prompt detected'
           : '[RPC] CLI prompt not seen within 5s, continuing',
     );
-    if (!identical(transport, transport)) return;
+    // Five seconds have passed. A reconnect during them swaps the session's
+    // transport, and carrying on would write start_rpc_session to the one we
+    // captured - now detached - and then declare RPC mode on a session whose
+    // live transport never saw the handshake.
+    if (!identical(transport, this.transport)) return;
 
     final echoed = await _waitForTextMarker(
       'start_rpc_session',
@@ -427,7 +467,13 @@ class FlipperSession {
 
     // Let trailing CLI bytes drain before treating the stream as protobuf.
     await Future<void>.delayed(const Duration(milliseconds: 150));
-    if (!identical(transport, transport)) return;
+    if (!identical(transport, this.transport)) return;
+    // And not if somebody else finished the handshake meanwhile: the guard
+    // above only sees a swapped transport, where the damage this does -
+    // writing ASCII into a protobuf stream, clearing the frame buffer under
+    // it - happens on the same one. The memo is what serialises that today,
+    // which leaves this destructive.
+    if (mode == FlipperMode.rpc) return;
     _frameBuffer.clear();
     _setMode(FlipperMode.rpc);
     _signalWorker();
