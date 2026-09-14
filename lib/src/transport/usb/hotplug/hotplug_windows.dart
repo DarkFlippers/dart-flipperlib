@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ffi';
 import 'dart:isolate';
 
@@ -102,13 +103,15 @@ class WindowsHotplugWatcher implements UsbHotplugWatcher {
       }
     });
 
-    Isolate.spawn(_windowEntry, recv.sendPort).then(
-      (iso) {
-        _isolate = iso;
-      },
-      onError: (Object e) {
-        Log.error('[USB] Windows hotplug isolate spawn failed: $e');
-      },
+    unawaited(
+      Isolate.spawn(_windowEntry, recv.sendPort).then(
+        (iso) {
+          _isolate = iso;
+        },
+        onError: (Object e) {
+          Log.error('[USB] Windows hotplug isolate spawn failed: $e');
+        },
+      ),
     );
     return true;
   }

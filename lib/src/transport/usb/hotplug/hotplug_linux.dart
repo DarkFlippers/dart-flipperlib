@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ffi';
 import 'dart:isolate';
 
@@ -60,13 +61,15 @@ class LinuxHotplugWatcher implements UsbHotplugWatcher {
       }
     });
 
-    Isolate.spawn(_monitorEntry, recv.sendPort).then(
-      (iso) {
-        _isolate = iso;
-      },
-      onError: (Object e) {
-        Log.error('[USB] Linux udev isolate spawn failed: $e');
-      },
+    unawaited(
+      Isolate.spawn(_monitorEntry, recv.sendPort).then(
+        (iso) {
+          _isolate = iso;
+        },
+        onError: (Object e) {
+          Log.error('[USB] Linux udev isolate spawn failed: $e');
+        },
+      ),
     );
     return true;
   }

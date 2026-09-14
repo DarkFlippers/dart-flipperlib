@@ -118,7 +118,7 @@ class AndroidDfuBackend implements DfuUsbBackend {
   }
 
   void _unsubscribe() {
-    _eventsSub?.cancel();
+    unawaited(_eventsSub?.cancel());
     _eventsSub = null;
     _last = null;
   }

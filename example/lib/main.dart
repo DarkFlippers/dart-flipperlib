@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flipperlib/flipperlib.dart';
 import 'package:flutter/material.dart';
 
@@ -32,12 +34,12 @@ class _DevicesPageState extends State<DevicesPage> {
     _flipper.devicesStream.listen((devices) {
       if (mounted) setState(() => _devices = devices);
     });
-    _scan();
+    unawaited(_scan());
   }
 
   @override
   void dispose() {
-    _flipper.disconnect();
+    unawaited(_flipper.disconnect());
     super.dispose();
   }
 

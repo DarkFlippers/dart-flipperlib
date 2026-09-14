@@ -1,0 +1,19 @@
+# flutter_lints is already a dev_dependency; this is the file that reads it.
+# The exclude block below is not hand-written - `flutter analyze` adds it to
+# any analysis_options.yaml that lacks one, so it is committed as it appears.
+analyzer:
+  exclude:
+    - build/**
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    # A Future-returning statement in an async body with no unawaited() around
+    # it: either it should have been awaited, or saying so is free.
+    - unawaited_futures

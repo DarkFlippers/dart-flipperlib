@@ -416,24 +416,28 @@ abstract class UniversalBleTransportBase extends Transport {
     final guard = _setupGuard;
     if (guard == null) return timeout == null ? op : op.timeout(timeout);
     final completer = Completer<T>();
-    op.then(
-      (value) {
-        if (!completer.isCompleted) completer.complete(value);
-      },
-      onError: (Object error, StackTrace stack) {
-        if (!completer.isCompleted) completer.completeError(error, stack);
-      },
+    unawaited(
+      op.then(
+        (value) {
+          if (!completer.isCompleted) completer.complete(value);
+        },
+        onError: (Object error, StackTrace stack) {
+          if (!completer.isCompleted) completer.completeError(error, stack);
+        },
+      ),
     );
-    guard.future.then((_) {
-      if (!completer.isCompleted) {
-        completer.completeError(
-          FlipperTransportError(
-            'BLE link dropped during session setup '
-            '(${closeReason ?? 'disconnected'})',
-          ),
-        );
-      }
-    });
+    unawaited(
+      guard.future.then((_) {
+        if (!completer.isCompleted) {
+          completer.completeError(
+            FlipperTransportError(
+              'BLE link dropped during session setup '
+              '(${closeReason ?? 'disconnected'})',
+            ),
+          );
+        }
+      }),
+    );
     final future = completer.future;
     return timeout == null ? future : future.timeout(timeout);
   }
@@ -1100,10 +1104,12 @@ abstract class UniversalBleTransportBase extends Transport {
     final timer = Timer(timeout, () {
       if (!result.isCompleted) result.complete(false);
     });
-    signal.future.whenComplete(() {
-      timer.cancel();
-      if (!result.isCompleted) result.complete(true);
-    });
+    unawaited(
+      signal.future.whenComplete(() {
+        timer.cancel();
+        if (!result.isCompleted) result.complete(true);
+      }),
+    );
     return result.future;
   }
 
