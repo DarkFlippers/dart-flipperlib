@@ -47,7 +47,7 @@ class DfuDetector {
   }
 
   void stop() {
-    _sub?.cancel();
+    unawaited(_sub?.cancel());
     _sub = null;
     _started = false;
   }

@@ -132,7 +132,7 @@ abstract class Transport {
     _failPendingWrites(reason);
     onFaultExtra(reason);
     if (!_bytesCtrl.isClosed) {
-      _bytesCtrl.close();
+      unawaited(_bytesCtrl.close());
     }
   }
 

@@ -822,7 +822,7 @@ class FlipperClient {
 
   void _detachPipes() {
     for (final pipe in _activePipes) {
-      pipe.cancel();
+      unawaited(pipe.cancel());
     }
     _activePipes.clear();
   }
@@ -845,7 +845,7 @@ class FlipperClient {
   }
 
   void _dropSessionLocked(FlipperSession session) {
-    _sessionWatches.remove(session)?.cancel();
+    unawaited(_sessionWatches.remove(session)?.cancel());
     final key = _deviceKey(session.device);
     if (identical(_sessions[key], session)) {
       _sessions.remove(key);
@@ -894,7 +894,7 @@ class FlipperClient {
       (s) => s.device.isUsb && (s.isConnected || s.isConnecting),
     );
     if (hasUsb) return;
-    _usbPresenceSub?.cancel();
+    unawaited(_usbPresenceSub?.cancel());
     _usbPresenceSub = null;
   }
 
