@@ -88,6 +88,33 @@ class FlipperConnectionState {
   /// radio and blocks scanning, so being able to abort it from here matters.
   final bool connecting;
 
+  /// What this event is.
+  ///
+  /// Worked out by the client as the event goes out, because only the client
+  /// knows what the last one said. A session raising its own state cannot, so
+  /// the default here is a placeholder the client replaces.
+  final FlipperConnectionEvent event;
+
+  /// Which Flipper the app's device-scoped state should describe from here on.
+  ///
+  /// Absolute, not a difference: a listener that subscribed after the switch - a
+  /// page rebuilt, a service started late, a handler that filtered the event out
+  /// because the mode was wrong - still sees that the device it holds is not
+  /// this one. [event] cannot tell it that, because a broadcast stream does not
+  /// replay what it missed.
+  final int deviceRevision;
+
+  /// The link is up and speaking RPC: the precondition for every device call
+  /// that is not raw CLI text.
+  ///
+  /// Not the same as [connected], and that gap is the point. A session that has
+  /// switched to CLI is still connected and will still refuse every RPC put to
+  /// it, so anything waiting on `connected` to go false waits for a timeout.
+  bool get rpcReady => connected && mode == FlipperMode.rpc;
+
+  /// The link is up and in CLI mode, ready for raw text.
+  bool get cliReady => connected && mode == FlipperMode.cli;
+
   const FlipperConnectionState({
     required this.mode,
     required this.device,
@@ -95,5 +122,25 @@ class FlipperConnectionState {
     this.closeReason,
     this.reconnecting = false,
     this.connecting = false,
+    this.event = FlipperConnectionEvent.disconnected,
+    this.deviceRevision = 0,
   });
+
+  /// Returns this state with the client's verdict attached.
+  ///
+  /// The client stamps every state it puts on its stream, including the ones
+  /// piped up from a session, so anything a listener receives is stamped.
+  FlipperConnectionState stamp(
+    FlipperConnectionEvent event,
+    int deviceRevision,
+  ) => FlipperConnectionState(
+    mode: mode,
+    device: device,
+    connected: connected,
+    closeReason: closeReason,
+    reconnecting: reconnecting,
+    connecting: connecting,
+    event: event,
+    deviceRevision: deviceRevision,
+  );
 }

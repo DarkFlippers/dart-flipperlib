@@ -28,7 +28,6 @@ class FlipperSession {
   final FlipperDevice device;
 
   final connectionCtrl = StreamController<FlipperConnectionState>.broadcast();
-  final modeCtrl = StreamController<FlipperMode>.broadcast();
   final rawCtrl = StreamController<List<int>>.broadcast();
   final textCtrl = StreamController<String>.broadcast();
   final messageCtrl = StreamController<Main>.broadcast();
@@ -643,7 +642,7 @@ class FlipperSession {
 
   Future<void> sendRpc(
     Main message, {
-    FlipperRequestPriority priority = FlipperRequestPriority.defaultPriority,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
     Duration sendTimeout = const Duration(seconds: 30),
   }) async {
     if (mode != FlipperMode.rpc) {
@@ -687,7 +686,7 @@ class FlipperSession {
   Future<List<Main>> callRpcFrames(
     Main request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.defaultPriority,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
     void Function(Main frame)? onFrame,
     void Function()? onSent,
     bool retainFrames = true,
@@ -759,7 +758,7 @@ class FlipperSession {
   Future<List<Main>> callRpcFramesMulti(
     Future<void> Function(Future<void> Function(Main frame) sendFrame) body, {
     Duration timeout = const Duration(seconds: 60),
-    FlipperRequestPriority priority = FlipperRequestPriority.defaultPriority,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) async {
     if (mode != FlipperMode.rpc) {
       await switchToRpcMode();
@@ -1342,7 +1341,6 @@ class FlipperSession {
   }) {
     if (this.mode == mode) return;
     this.mode = mode;
-    if (!modeCtrl.isClosed) modeCtrl.add(mode);
     if (connectionCtrl.isClosed) return;
     connectionCtrl.add(
       FlipperConnectionState(
@@ -1367,7 +1365,6 @@ class FlipperSession {
 
   Future<void> dispose() async {
     await connectionCtrl.close();
-    await modeCtrl.close();
     await rawCtrl.close();
     await textCtrl.close();
     await messageCtrl.close();

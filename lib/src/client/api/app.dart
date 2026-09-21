@@ -13,7 +13,7 @@ extension FlipperAppApi on FlipperClient {
   Future<List<Main>> appStart(
     StartRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(appStartRequest: request),
@@ -25,7 +25,7 @@ extension FlipperAppApi on FlipperClient {
 
   Future<FlipperRpcBatch<LockStatusResponse>> appLockStatus({
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpc(
       Main(appLockStatusRequest: LockStatusRequest()),
@@ -39,7 +39,7 @@ extension FlipperAppApi on FlipperClient {
   Future<List<Main>> appExit(
     AppExitRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(appExitRequest: request),
@@ -52,7 +52,7 @@ extension FlipperAppApi on FlipperClient {
   Future<List<Main>> appLoadFile(
     AppLoadFileRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(appLoadFileRequest: request),
@@ -110,7 +110,7 @@ extension FlipperAppApi on FlipperClient {
 
   Future<FlipperRpcBatch<GetErrorResponse>> appGetError({
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpc(
       Main(appGetErrorRequest: GetErrorRequest()),
@@ -124,7 +124,7 @@ extension FlipperAppApi on FlipperClient {
   Future<List<Main>> appDataExchange(
     DataExchangeRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(appDataExchangeRequest: request),

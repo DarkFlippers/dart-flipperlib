@@ -15,10 +15,81 @@ import '../transport/ble/ble.dart';
 import '../transport/transport.dart';
 import '../transport/usb/usb.dart';
 
+// Zone key for the session the running task is bound to.
+final Object _taskBindingKey = Object();
+
+class _TaskBinding {
+  const _TaskBinding(this.session);
+
+  // Null when a task unbound itself on purpose: work the user drives follows
+  // the device on screen even when it started from inside a bound task.
+  final FlipperSession? session;
+}
+
+/// A pass's claim on the Flipper that was in scope when it started.
+///
+/// Work outlives devices. A walk, an upload, a firmware transfer or a
+/// catalogue request runs for as long as it runs, and warm sessions let the
+/// user swap Flippers without the link ever dropping - `isConnected` stays true
+/// right across the switch, so it cannot be the test. Take a token before the
+/// work and check [isStale] after each await, before writing anything the
+/// switch invalidated.
+///
+/// This answers what to keep, not where to send. Which Flipper a request
+/// reaches is [FlipperClient.runTask]'s job, and the two are not
+/// interchangeable: a transfer that finishes on the previous device is correct
+/// and complete *there*, while what the app records about it is still dropped,
+/// because the screen describes a different one now.
+class DeviceToken {
+  const DeviceToken._(this._client, this._revision);
+
+  final FlipperClient _client;
+  final int _revision;
+
+  bool get isCurrent => _revision == _client._deviceRevision;
+
+  bool get isStale => !isCurrent;
+
+  @override
+  bool operator ==(Object other) =>
+      other is DeviceToken &&
+      identical(other._client, _client) &&
+      other._revision == _revision;
+
+  @override
+  int get hashCode => Object.hash(identityHashCode(_client), _revision);
+}
+
+/// The session a task talks to, held so it can go on talking to it after the
+/// user has switched devices.
+///
+/// [FlipperClient.runTask] covers work that fits in one async body. This is for
+/// work that outlives one - a screen stream, a virtual display - where the stop
+/// command has to reach the Flipper the stream runs on rather than the one that
+/// happens to be on screen when the page closes.
+class FlipperSessionBinding {
+  const FlipperSessionBinding._(this._session);
+
+  final FlipperSession? _session;
+
+  FlipperDevice? get device => _session?.device;
+
+  /// False once the bound link is gone. Requests made under a dead binding
+  /// fail; they never retarget the device that is active now.
+  bool get isAlive => _session?.isConnected ?? false;
+
+  /// Runs [body] with every request it makes bound to this session.
+  T run<T>(T Function() body) =>
+      runZoned(body, zoneValues: {_taskBindingKey: _TaskBinding(_session)});
+}
+
 // Facade over N FlipperSession objects (one per physical link) plus device
-// discovery. Exactly one session is "active": every RPC/CLI entry point and
-// every public stream routes to it. The other sessions stay connected and
-// warm — activate() swaps the routing instantly, with zero radio work.
+// discovery. Exactly one session is "active": the public streams and the
+// device-state getters route to it, and so does any request that is not part
+// of a bound task. The other sessions stay connected and warm — activate()
+// swaps the routing instantly, with zero radio work, which is exactly why work
+// that spans a switch has to hold the session it started against instead of
+// asking for the active one again.
 class FlipperClient {
   static const String bleServiceUuid = flipperBleServiceUuid;
   static const String bleRxUuid = flipperBleRxUuid;
@@ -37,7 +108,6 @@ class FlipperClient {
 
   final _devicesCtrl = StreamController<List<FlipperDevice>>.broadcast();
   final connectionCtrl = StreamController<FlipperConnectionState>.broadcast();
-  final modeCtrl = StreamController<FlipperMode>.broadcast();
   final rawCtrl = StreamController<List<int>>.broadcast();
   final textCtrl = StreamController<String>.broadcast();
   final messageCtrl = StreamController<Main>.broadcast();
@@ -56,6 +126,14 @@ class FlipperClient {
   final List<StreamSubscription<dynamic>> _activePipes = [];
   FlipperSession? _active;
   int _activationSeq = 0;
+
+  String? _scopedDeviceId;
+  int _deviceRevision = 0;
+  // What the last state put on connectionCtrl said the scope was. The one piece
+  // of "have I noticed yet" bookkeeping in the app, kept here so that no
+  // listener has to keep its own.
+  int _announcedRevision = 0;
+  FlipperMode _announcedMode = FlipperMode.disconnected;
 
   Future<void> _lifecycleChain = Future.value();
   bool autoReconnect = true;
@@ -99,8 +177,6 @@ class FlipperClient {
   Stream<List<FlipperDevice>> get devicesStream => _devicesCtrl.stream;
 
   Stream<FlipperConnectionState> get connectionStream => connectionCtrl.stream;
-
-  Stream<FlipperMode> get modeStream => modeCtrl.stream;
 
   Stream<List<int>> get rawBytesStream => rawCtrl.stream;
 
@@ -176,11 +252,23 @@ class FlipperClient {
 
   bool get isConnected => _active?.isConnected ?? false;
 
+  /// The link is up and speaking RPC - the precondition for every device call
+  /// the app makes that is not raw CLI text.
+  ///
+  /// Here rather than assembled by each caller: a session in CLI mode is still
+  /// connected and still refuses every RPC, so `isConnected` alone is the wrong
+  /// question and open-coding the right one in each place is how some callers
+  /// end up asking the wrong one.
+  bool get isRpcReady => isConnected && mode == FlipperMode.rpc;
+
+  /// The link is up and in CLI mode, ready for raw text.
+  bool get isCliReady => isConnected && mode == FlipperMode.cli;
+
   bool get isScanning => _scanning;
 
-  Transport? get transport => _active?.transport;
+  Transport? get transport => _currentSession?.transport;
 
-  bool get storageBusy => _active?.storageBusy ?? false;
+  bool get storageBusy => _currentSession?.storageBusy ?? false;
 
   bool get cliExclusive => _cliExclusive;
 
@@ -190,24 +278,24 @@ class FlipperClient {
   }
 
   Map<String, String> get deviceInfoCache =>
-      _active?.deviceInfoCache ?? const {};
+      _currentSession?.deviceInfoCache ?? const {};
 
-  bool get deviceInfoFetched => _active?.deviceInfoFetched ?? false;
+  bool get deviceInfoFetched => _currentSession?.deviceInfoFetched ?? false;
 
   void publishDeviceInfoPatch(Map<String, String> patch) {
-    _active?.publishDeviceInfoPatch(patch);
+    _currentSession?.publishDeviceInfoPatch(patch);
   }
 
   Map<String, String> get deviceInfoWatchSnapshot =>
-      _active?.deviceInfoWatchSnapshot ?? const {};
+      _currentSession?.deviceInfoWatchSnapshot ?? const {};
 
-  String? getName() => _active?.getName();
+  String? getName() => _currentSession?.getName();
 
   String? getNameOf(FlipperDevice device) =>
       _findSession(device.id, link: device.link)?.getName();
 
   Future<String> awaitName() {
-    final session = _active;
+    final session = _currentSession;
     if (session == null) {
       return Future.error(
         StateError('Cannot fetch device info: no active transport'),
@@ -217,7 +305,7 @@ class FlipperClient {
   }
 
   Future<Map<String, String>> awaitDeviceInfo() {
-    final session = _active;
+    final session = _currentSession;
     if (session == null) {
       return Future.error(
         StateError('Cannot fetch device info: no active transport'),
@@ -226,14 +314,129 @@ class FlipperClient {
     return session.awaitDeviceInfo();
   }
 
-  int nextCommandId() => _requireActiveSession().nextCommandId();
+  int nextCommandId() => _requireCurrentSession().nextCommandId();
 
-  FlipperSession _requireActiveSession() {
-    final session = _active;
+  // The task's binding, or nothing when the caller is not running inside one.
+  /// Which Flipper the app's device-scoped state describes right now.
+  ///
+  /// Everything an app keeps about a device - what is installed on it, what its
+  /// firmware is, what a page is showing - belongs to one Flipper, and a token
+  /// taken from here says whether it still does. See [DeviceToken].
+  DeviceToken get deviceToken => DeviceToken._(this, _deviceRevision);
+
+  String? get scopedDeviceId => _scopedDeviceId;
+
+  // Moving to a different Flipper stales every token handed out so far.
+  //
+  // Losing the link is not a move: the same device coming back leaves the work
+  // that was in flight valid, and so does a swap between two links to one
+  // Flipper - same storage, same apps, same firmware. Only the identity counts.
+  // Attaches the client's verdict to a state on its way out: what happened, and
+  // which Flipper it is about. A session cannot work the first out - it does not
+  // know what the previous event said - so every state is stamped here, whether
+  // it was raised by the facade or piped up from a session.
+  FlipperConnectionState _stampEvent(FlipperConnectionState state) {
+    final deviceMoved = _deviceRevision != _announcedRevision;
+    final previousMode = _announcedMode;
+    _announcedRevision = _deviceRevision;
+    _announcedMode = state.mode;
+
+    final FlipperConnectionEvent event;
+    if (!state.connected) {
+      event = state.connecting
+          ? FlipperConnectionEvent.connecting
+          : FlipperConnectionEvent.disconnected;
+    } else if (deviceMoved) {
+      // Ranked above a mode change because it is the larger statement: a
+      // listener told the Flipper changed has nothing left to salvage from what
+      // it knew, whichever protocol the new one came up in.
+      event = FlipperConnectionEvent.deviceChanged;
+    } else if (state.mode != previousMode &&
+        previousMode != FlipperMode.disconnected) {
+      // Between working modes only. Coming up out of nothing is a connect, not
+      // a protocol switch, and calling it one would hide the connect from every
+      // listener waiting for it.
+      event = FlipperConnectionEvent.modeChanged;
+    } else {
+      event = FlipperConnectionEvent.connected;
+    }
+    return state.stamp(event, _deviceRevision);
+  }
+
+  void _moveScope(FlipperSession? session) {
+    final id = session?.device.id;
+    if (id == null || id == _scopedDeviceId) return;
+    _scopedDeviceId = id;
+    _deviceRevision++;
+  }
+
+  FlipperSession? get _boundSession {
+    final binding = Zone.current[_taskBindingKey];
+    return binding is _TaskBinding ? binding.session : null;
+  }
+
+  /// The session a request of [priority] issued right here should reach.
+  ///
+  /// [FlipperRequestPriority.foreground] always means the active session. Those
+  /// are the readings that exist to be shown - voltage, current, device info -
+  /// and they follow whichever Flipper the user is looking at, because being
+  /// looked at is their whole purpose. They are never part of a task, so this
+  /// takes nothing away from one.
+  ///
+  /// Everything else goes to the running task's binding, falling back to the
+  /// active session when there is no task. A task keeps the link it bound for
+  /// the work itself and for the `rightNow` control that belongs to it - the
+  /// ping pacing an upload, the delete of its half-written file, the stop that
+  /// puts a screen stream out. A binding whose link is gone fails the request
+  /// rather than falling back: retargeting is the bug this exists to stop.
+  FlipperSession? _sessionFor(FlipperRequestPriority priority) {
+    if (priority == FlipperRequestPriority.foreground) return _active;
+    return _boundSession ?? _active;
+  }
+
+  FlipperSession? get _currentSession => _boundSession ?? _active;
+
+  FlipperSession _requireSessionFor(FlipperRequestPriority priority) {
+    final session = _sessionFor(priority);
     if (session == null) {
       throw StateError('No active transport');
     }
     return session;
+  }
+
+  FlipperSession _requireCurrentSession() {
+    final session = _currentSession;
+    if (session == null) {
+      throw StateError('No active transport');
+    }
+    return session;
+  }
+
+  /// Binds the session this task is talking to, for work that outlives one
+  /// async body and has to go on reaching the same Flipper.
+  FlipperSessionBinding bindCurrentSession() =>
+      FlipperSessionBinding._(_currentSession);
+
+  /// Runs [body] as one task.
+  ///
+  /// [FlipperRequestPriority.background] binds the session in play right now:
+  /// a scan, an install or a manifest refresh goes on talking to the Flipper it
+  /// started against, whatever the user plugs in meanwhile. Every other
+  /// priority unbinds, so work the user drives follows the device on screen,
+  /// which is what a tap means.
+  ///
+  /// Requests inside [body] inherit the binding whatever their own priority is:
+  /// the priority orders the queue, the task picks the device. Nesting follows
+  /// the same rule, so a background task started inside another one stays on
+  /// the outer task's link rather than jumping to the active session.
+  Future<T> runTask<T>(
+    FlipperRequestPriority priority,
+    Future<T> Function() body,
+  ) {
+    final binding = priority == FlipperRequestPriority.background
+        ? FlipperSessionBinding._(_currentSession)
+        : const FlipperSessionBinding._(null);
+    return binding.run(body);
   }
 
   // ── Discovery ──────────────────────────────────────────────────────────────
@@ -778,15 +981,15 @@ class FlipperClient {
     }
     _detachPipes();
     _active = session;
+    _moveScope(session);
     if (session != null) {
       session.activationStamp = ++_activationSeq;
       _cliExclusive = session.cliExclusive;
       _activePipes.addAll([
-        session.modeCtrl.stream.listen((event) {
-          if (!modeCtrl.isClosed) modeCtrl.add(event);
-        }),
         session.connectionCtrl.stream.listen((event) {
-          if (!connectionCtrl.isClosed) connectionCtrl.add(event);
+          if (!connectionCtrl.isClosed) {
+            connectionCtrl.add(_stampEvent(event));
+          }
         }),
         session.rawCtrl.stream.listen((event) {
           if (!rawCtrl.isClosed) rawCtrl.add(event);
@@ -830,16 +1033,17 @@ class FlipperClient {
   void _announceActiveState() {
     final session = _active;
     final mode = session?.mode ?? FlipperMode.disconnected;
-    if (!modeCtrl.isClosed) modeCtrl.add(mode);
     if (connectionCtrl.isClosed) return;
     final connected = session?.isConnected ?? false;
     final connecting = session?.isConnecting ?? false;
     connectionCtrl.add(
-      FlipperConnectionState(
-        mode: mode,
-        device: (connected || connecting) ? session!.device : null,
-        connected: connected,
-        connecting: connecting,
+      _stampEvent(
+        FlipperConnectionState(
+          mode: mode,
+          device: (connected || connecting) ? session!.device : null,
+          connected: connected,
+          connecting: connecting,
+        ),
       ),
     );
   }
@@ -963,7 +1167,7 @@ class FlipperClient {
   // ── RPC / CLI delegation to the active session ─────────────────────────────
 
   Future<void> switchToRpcMode() {
-    final session = _active;
+    final session = _currentSession;
     if (session == null) {
       return Future.error(StateError('No active transport'));
     }
@@ -976,13 +1180,13 @@ class FlipperClient {
   // Callers fire it unawaited, where a thrown "No active transport" would
   // otherwise surface as an unhandled exception and crash the frame.
   Future<void> enterRpcMode() {
-    final session = _active;
+    final session = _currentSession;
     if (session == null || session.transport == null) return Future.value();
     return session.switchToRpcMode();
   }
 
   Future<void> switchToCliMode() {
-    final session = _active;
+    final session = _currentSession;
     if (session == null) {
       return Future.error(StateError('No device connected'));
     }
@@ -995,7 +1199,7 @@ class FlipperClient {
     String command, {
     Duration timeout = const Duration(seconds: 5),
   }) {
-    final session = _active;
+    final session = _currentSession;
     if (session == null) {
       return Future.error(StateError('No active transport'));
     }
@@ -1010,34 +1214,32 @@ class FlipperClient {
   }
 
   Future<void> writeCliText(String text) =>
-      _requireActiveSession().writeCliText(text);
+      _requireCurrentSession().writeCliText(text);
 
   Future<void> writeCliBytes(Uint8List bytes) =>
-      _requireActiveSession().writeCliBytes(bytes);
+      _requireCurrentSession().writeCliBytes(bytes);
 
   Future<void> sendRpc(
     Main message, {
-    FlipperRequestPriority priority = FlipperRequestPriority.defaultPriority,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
     Duration sendTimeout = const Duration(seconds: 30),
   }) {
-    return _requireActiveSession().sendRpc(
-      message,
-      priority: priority,
-      sendTimeout: sendTimeout,
-    );
+    return _requireSessionFor(
+      priority,
+    ).sendRpc(message, priority: priority, sendTimeout: sendTimeout);
   }
 
   Future<List<Main>> callRpcFrames(
     Main request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.defaultPriority,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
     void Function(Main frame)? onFrame,
     void Function()? onSent,
     bool retainFrames = true,
     bool interleavable = false,
     bool pipelined = true,
   }) {
-    return _requireActiveSession().callRpcFrames(
+    return _requireSessionFor(priority).callRpcFrames(
       request,
       timeout: timeout,
       priority: priority,
@@ -1052,20 +1254,18 @@ class FlipperClient {
   Future<List<Main>> callRpcFramesMulti(
     Future<void> Function(Future<void> Function(Main frame) sendFrame) body, {
     Duration timeout = const Duration(seconds: 60),
-    FlipperRequestPriority priority = FlipperRequestPriority.defaultPriority,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
-    return _requireActiveSession().callRpcFramesMulti(
-      body,
-      timeout: timeout,
-      priority: priority,
-    );
+    return _requireSessionFor(
+      priority,
+    ).callRpcFramesMulti(body, timeout: timeout, priority: priority);
   }
 
   Future<FlipperRpcBatch<T>> callRpc<T extends $pb.GeneratedMessage>(
     Main request,
     T? Function(Main frame) pick, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.defaultPriority,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
     void Function(Main frame)? onFrame,
   }) async {
     final frames = await callRpcFrames(
@@ -1134,15 +1334,17 @@ class FlipperClient {
     final timer = Timer(timeout, () {
       if (!restored.isCompleted) restored.complete(false);
     });
-    final modeSub = modeStream.listen((mode) {
-      if (mode == FlipperMode.rpc && healthy() && !restored.isCompleted) {
-        restored.complete(true);
-      }
-    });
-    // A terminal disconnect (no reconnect in progress) ends the wait early
-    // instead of burning the whole timeout.
+    // One subscription for both answers: every state carries the mode, and the
+    // two are raised together, so a separate mode stream only meant two
+    // subscriptions racing to settle the same completer.
+    //
+    // A terminal disconnect - no reconnect in progress - ends the wait early
+    // rather than burning the whole timeout.
     final connSub = connectionStream.listen((state) {
-      if (!state.connected && !state.reconnecting && !restored.isCompleted) {
+      if (restored.isCompleted) return;
+      if (state.mode == FlipperMode.rpc && healthy()) {
+        restored.complete(true);
+      } else if (!state.connected && !state.reconnecting) {
         restored.complete(false);
       }
     });
@@ -1151,7 +1353,6 @@ class FlipperClient {
     }
     final result = await restored.future;
     timer.cancel();
-    await modeSub.cancel();
     await connSub.cancel();
     return result;
   }
@@ -1167,7 +1368,6 @@ class FlipperClient {
     _devicesEmitTimer = null;
     await _devicesCtrl.close();
     await connectionCtrl.close();
-    await modeCtrl.close();
     await rawCtrl.close();
     await textCtrl.close();
     await messageCtrl.close();

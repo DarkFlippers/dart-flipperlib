@@ -9,7 +9,7 @@ extension FlipperGpioApi on FlipperClient {
   Future<List<Main>> gpioSetPinMode(
     SetPinMode request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(gpioSetPinMode: request),
@@ -21,7 +21,7 @@ extension FlipperGpioApi on FlipperClient {
   Future<List<Main>> gpioSetInputPull(
     SetInputPull request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(gpioSetInputPull: request),
@@ -33,7 +33,7 @@ extension FlipperGpioApi on FlipperClient {
   Future<FlipperRpcBatch<GetPinModeResponse>> gpioGetPinMode(
     GetPinMode request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpc(
       Main(gpioGetPinMode: request),
@@ -48,7 +48,7 @@ extension FlipperGpioApi on FlipperClient {
   Future<FlipperRpcBatch<ReadPinResponse>> gpioReadPin(
     ReadPin request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpc(
       Main(gpioReadPin: request),
@@ -62,7 +62,7 @@ extension FlipperGpioApi on FlipperClient {
   Future<List<Main>> gpioWritePin(
     WritePin request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(gpioWritePin: request),
@@ -73,7 +73,7 @@ extension FlipperGpioApi on FlipperClient {
 
   Future<FlipperRpcBatch<GetOtgModeResponse>> gpioGetOtgMode({
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpc(
       Main(gpioGetOtgMode: GetOtgMode()),
@@ -88,7 +88,7 @@ extension FlipperGpioApi on FlipperClient {
   Future<List<Main>> gpioSetOtgMode(
     SetOtgMode request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(gpioSetOtgMode: request),

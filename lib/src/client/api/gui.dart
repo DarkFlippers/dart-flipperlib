@@ -21,7 +21,7 @@ extension FlipperGuiApi on FlipperClient {
 
   Future<List<Main>> startScreenFrameStream({
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(guiStartScreenStreamRequest: StartScreenStreamRequest()),
@@ -32,7 +32,7 @@ extension FlipperGuiApi on FlipperClient {
 
   Future<List<Main>> stopScreenFrameStream({
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(guiStopScreenStreamRequest: StopScreenStreamRequest()),
@@ -49,14 +49,14 @@ extension FlipperGuiApi on FlipperClient {
 
   Future<List<Main>> guiStartScreenStream({
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return startScreenFrameStream(timeout: timeout, priority: priority);
   }
 
   Future<List<Main>> guiStopScreenStream({
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return stopScreenFrameStream(timeout: timeout, priority: priority);
   }
@@ -64,7 +64,7 @@ extension FlipperGuiApi on FlipperClient {
   Future<List<Main>> guiStartVirtualDisplay(
     StartVirtualDisplayRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(guiStartVirtualDisplayRequest: request),
@@ -75,7 +75,7 @@ extension FlipperGuiApi on FlipperClient {
 
   Future<List<Main>> guiStopVirtualDisplay({
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(guiStopVirtualDisplayRequest: StopVirtualDisplayRequest()),

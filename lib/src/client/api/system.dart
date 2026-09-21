@@ -79,7 +79,7 @@ extension FlipperSystemApi on FlipperClient {
   Future<List<Main>> setDateTime(
     SetDateTimeRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(systemSetDatetimeRequest: request),
@@ -91,7 +91,7 @@ extension FlipperSystemApi on FlipperClient {
   Future<List<Main>> update(
     UpdateRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(systemUpdateRequest: request),
@@ -116,7 +116,7 @@ extension FlipperSystemApi on FlipperClient {
   Future<List<Main>> factoryReset(
     FactoryResetRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(systemFactoryResetRequest: request),
@@ -145,7 +145,7 @@ extension FlipperSystemApi on FlipperClient {
   Future<List<Main>> playAudiovisualAlert(
     PlayAudiovisualAlertRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(systemPlayAudiovisualAlertRequest: request),

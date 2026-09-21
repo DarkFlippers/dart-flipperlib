@@ -14,7 +14,7 @@ extension FlipperStorageApi on FlipperClient {
   Future<FlipperRpcBatch<ListResponse>> storageList(
     ListRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpc(
       Main(storageListRequest: request),
@@ -28,7 +28,7 @@ extension FlipperStorageApi on FlipperClient {
   Future<FlipperRpcBatch<ReadResponse>> storageRead(
     ReadRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpc(
       Main(storageReadRequest: request),
@@ -43,12 +43,18 @@ extension FlipperStorageApi on FlipperClient {
   /// When [expectedSize] is > 0 (e.g. the size from a prior directory listing),
   /// [onProgress] is called with a 0..1 ratio of bytes received; it always
   /// fires once with 1.0 on completion. Returns the assembled file bytes.
+  /// Reads [path] whole, in frames.
+  ///
+  /// Background by default because that is what it is: a file belongs to one
+  /// Flipper and pulling it takes as long as it takes. Nothing on screen is
+  /// blocked on an individual frame, and jumping the queue ahead of the
+  /// readings the UI does need buys nothing.
   Future<List<int>> storageReadChunked(
     String path, {
     int expectedSize = 0,
     void Function(double progress)? onProgress,
     Duration timeout = const Duration(minutes: 5),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.background,
   }) async {
     // Data is collected per frame into a byte builder and the frames are not
     // retained: holding every protobuf frame plus a growable List<int> copy
@@ -85,10 +91,13 @@ extension FlipperStorageApi on FlipperClient {
     );
   }
 
+  /// Ordinary priority, not foreground: removing a file acts on one Flipper's
+  /// storage, so it belongs to whatever task is doing that - foreground would
+  /// send it to whichever device is on screen when it goes out.
   Future<List<Main>> storageDelete(
     DeleteRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(storageDeleteRequest: request),
@@ -97,10 +106,12 @@ extension FlipperStorageApi on FlipperClient {
     );
   }
 
+  /// Ordinary priority, for the same reason as [storageDelete]: the directory
+  /// is made on the Flipper the task is writing to, not on the one on screen.
   Future<List<Main>> storageMkdir(
     MkdirRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(storageMkdirRequest: request),
@@ -112,7 +123,7 @@ extension FlipperStorageApi on FlipperClient {
   Future<FlipperRpcBatch<Md5sumResponse>> storageMd5sum(
     Md5sumRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpc(
       Main(storageMd5sumRequest: request),
@@ -126,7 +137,7 @@ extension FlipperStorageApi on FlipperClient {
   Future<FlipperRpcBatch<StatResponse>> storageStat(
     StatRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpc(
       Main(storageStatRequest: request),
@@ -154,7 +165,7 @@ extension FlipperStorageApi on FlipperClient {
   Future<List<Main>> storageRename(
     RenameRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpcFrames(
       Main(storageRenameRequest: request),
@@ -194,7 +205,7 @@ extension FlipperStorageApi on FlipperClient {
   Future<int> storageDu(
     String path, {
     Duration timeout = const Duration(seconds: 30),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.background,
   }) async {
     var total = 0;
     final queue = <String>[path];
@@ -236,7 +247,7 @@ extension FlipperStorageApi on FlipperClient {
   Future<FlipperRpcBatch<TimestampResponse>> storageTimestamp(
     TimestampRequest request, {
     Duration timeout = const Duration(seconds: 8),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
     return callRpc(
       Main(storageTimestampRequest: request),
@@ -248,7 +259,14 @@ extension FlipperStorageApi on FlipperClient {
     );
   }
 
-  /// Streams [data] to [path]. The firmware opens the target with
+  /// Streams [data] to [path], in frames.
+  ///
+  /// Background by default: an upload belongs to one Flipper and runs for as
+  /// long as the file is big. It used to be foreground, which put a firmware
+  /// write ahead of everything the screen was waiting on and described the
+  /// heaviest thing the app does as the most urgent.
+  ///
+  /// The firmware opens the target with
   /// CREATE_ALWAYS, so an existing file is truncated by the first frame —
   /// deleting it beforehand is pointless. [isCancelled] is checked before
   /// every chunk; on cancellation the firmware's write stream is closed
@@ -259,7 +277,7 @@ extension FlipperStorageApi on FlipperClient {
     List<int> data, {
     void Function(double progress)? onProgress,
     Duration timeout = const Duration(seconds: 300),
-    FlipperRequestPriority priority = FlipperRequestPriority.foreground,
+    FlipperRequestPriority priority = FlipperRequestPriority.background,
     bool Function()? isCancelled,
   }) async {
     final total = data.length;
