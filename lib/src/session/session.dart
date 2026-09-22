@@ -328,7 +328,9 @@ class FlipperSession {
     if (wasRpc && !cliHeld) {
       unawaited(
         switchToRpcMode().catchError((Object error) {
-          Log.error('[FlipperClient] RPC restore after reconnect failed: $error');
+          Log.error(
+            '[FlipperClient] RPC restore after reconnect failed: $error',
+          );
         }),
       );
     }
