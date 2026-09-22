@@ -105,6 +105,15 @@ class FlipperClient {
   // slots to the still-winding-down scan — on Apple that surfaces as
   // CBErrorEncryptionTimedOut mid-pairing.
   static const Duration radioSettle = Duration(milliseconds: 300);
+  // How long connectBleAddress waits before giving the radio back. Matches
+  // flipper-android's own bound for a connect to a remembered device.
+  static const Duration bleAddressConnectTimeout = Duration(seconds: 30);
+  // How long connectBleAddress waits for the platform's BLE stack to come up
+  // before dialling. A scan checks the adapter state itself and simply reports
+  // nothing while it is down; a direct connect has no such step, and a cold
+  // CoreBluetooth central answers every address with "unknown deviceId" until
+  // it reaches poweredOn - which is exactly the first second after launch.
+  static const Duration bleAvailabilityWait = Duration(seconds: 5);
 
   final _devicesCtrl = StreamController<List<FlipperDevice>>.broadcast();
   final connectionCtrl = StreamController<FlipperConnectionState>.broadcast();
@@ -766,6 +775,63 @@ class FlipperClient {
       throw StateError('Device not found: $id');
     }
     return connect(device);
+  }
+
+  /// Connects straight to a BLE device by its platform address, with no scan.
+  ///
+  /// Discovery is pure overhead for an address the caller already knows: every
+  /// platform resolves it on its own (Android `getRemoteDevice`, Apple
+  /// `retrievePeripherals`), so the link opens from the address alone. The
+  /// address is whatever the platform used as an id at discovery time - a MAC
+  /// on Android / Linux / Windows, an opaque peer UUID on iOS / macOS. [name]
+  /// is cosmetic, carried only until the device reports its own.
+  ///
+  /// A device already in [devices] is reused as-is, so an address that holds a
+  /// live session swaps to it instantly instead of reconnecting.
+  ///
+  /// Unlike a connect to a scanned device, this one is bounded by [timeout]:
+  /// a remembered device is already bonded, so the attempt cannot be sitting
+  /// in a PIN prompt, and an address that is out of range would otherwise hold
+  /// the client in its connecting state for the platform's own 60 s.
+  Future<FlipperDevice> connectBleAddress(
+    String address, {
+    String? name,
+    Duration timeout = bleAddressConnectTimeout,
+  }) async {
+    final known = _devices['${FlipperLink.ble.name}:$address'];
+    final device =
+        known ??
+        _fromDiscovered(
+          BleDiscoveredDevice(uble.BleDevice(deviceId: address, name: name)),
+        );
+    await _awaitBleAvailable(bleAvailabilityWait);
+    try {
+      final connected = await connect(device).timeout(timeout);
+      _rememberDevice(connected);
+      return connected;
+    } on TimeoutException {
+      await disconnectDevice(address, link: FlipperLink.ble);
+      throw FlipperTransportError(
+        'BLE connect to $address timed out after ${timeout.inSeconds}s',
+      );
+    }
+  }
+
+  Future<void> _awaitBleAvailable(Duration timeout) async {
+    try {
+      final state = await uble.UniversalBle.getBluetoothAvailabilityState();
+      if (state == uble.AvailabilityState.poweredOn) return;
+      Log.info('[BLE] adapter is $state; waiting for it to power on');
+      await uble.UniversalBle.availabilityStream
+          .firstWhere((s) => s == uble.AvailabilityState.poweredOn)
+          .timeout(timeout);
+      Log.info('[BLE] adapter powered on');
+    } catch (e) {
+      // Falling through on purpose: the connect below is what reports an
+      // adapter that is off or unauthorised, with the platform's own error
+      // for the UI to classify.
+      Log.info('[BLE] adapter did not report ready: $e');
+    }
   }
 
   /// Connects to [device] and makes its session the active one. An already
