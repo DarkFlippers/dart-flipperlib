@@ -147,7 +147,6 @@ class FlipperClient {
   Future<void> _lifecycleChain = Future.value();
   bool autoReconnect = true;
   static const int maxSessions = 2;
-  bool _cliExclusive = false;
 
   StreamSubscription<void>? _usbPresenceSub;
 
@@ -222,8 +221,6 @@ class FlipperClient {
   List<FlipperDevice> get devices =>
       List.unmodifiable(_devices.values.toList());
 
-  List<FlipperDevice> listDevices() => devices;
-
   List<FlipperSessionInfo> get sessions => List.unmodifiable([
     for (final session in _sessions.values)
       FlipperSessionInfo(
@@ -279,12 +276,9 @@ class FlipperClient {
 
   bool get storageBusy => _currentSession?.storageBusy ?? false;
 
-  bool get cliExclusive => _cliExclusive;
-
-  set cliExclusive(bool value) {
-    _cliExclusive = value;
-    _active?.cliExclusive = value;
-  }
+  /// True while an open CLI channel holds the session requests would reach:
+  /// RPC is refused until the channel closes.
+  bool get cliHeld => _currentSession?.cliHeld ?? false;
 
   Map<String, String> get deviceInfoCache =>
       _currentSession?.deviceInfoCache ?? const {};
@@ -475,12 +469,6 @@ class FlipperClient {
     _emitDevices(immediate: true);
     await _scanPhase(epoch, bleTimeout);
     return devices;
-  }
-
-  Future<List<FlipperDevice>> searchDevices({
-    Duration bleTimeout = const Duration(seconds: 10),
-  }) {
-    return refreshDevices(bleTimeout: bleTimeout);
   }
 
   Future<void> scanBle({Duration timeout = const Duration(seconds: 10)}) {
@@ -763,20 +751,6 @@ class FlipperClient {
 
   // ── Session lifecycle ──────────────────────────────────────────────────────
 
-  Future<FlipperDevice> connectById(String id, {FlipperLink? link}) async {
-    FlipperDevice? device;
-    for (final candidate in devices) {
-      if (candidate.id != id) continue;
-      if (link != null && candidate.link != link) continue;
-      device = candidate;
-      break;
-    }
-    if (device == null) {
-      throw StateError('Device not found: $id');
-    }
-    return connect(device);
-  }
-
   /// Connects straight to a BLE device by its platform address, with no scan.
   ///
   /// Discovery is pure overhead for an address the caller already knows: every
@@ -834,22 +808,27 @@ class FlipperClient {
     }
   }
 
-  /// Connects to [device] and makes its session the active one. An already
-  /// connected session is reused (an instant swap); other live sessions are
-  /// kept connected and warm.
-  Future<FlipperDevice> connect(FlipperDevice device, {bool autoRpc = true}) =>
-      serialized(() => _connectLocked(device, autoRpc: autoRpc));
+  /// Opens the link to [device] and makes its session the active one. An
+  /// already connected session is reused (an instant swap); other live
+  /// sessions are kept connected and warm.
+  ///
+  /// The link alone: the session comes up in the transport's own mode (USB in
+  /// CLI, BLE in RPC) and nothing is switched here. [switchToRpcMode] and
+  /// [switchToCliMode] are the two moves, each a no-op when already there, and
+  /// every RPC sender makes the first one on its own before its request.
+  Future<FlipperDevice> connect(FlipperDevice device) =>
+      serialized(() async => (await _openLocked(device)).device);
 
-  Future<FlipperDevice> _connectLocked(
+  Future<FlipperSession> _openLocked(
     FlipperDevice device, {
-    bool autoRpc = true,
+    bool activate = true,
   }) async {
     final key = _deviceKey(device);
     final existing = _sessions[key];
     if (existing != null) {
       if (existing.isConnected || existing.isConnecting) {
-        _activateLocked(existing);
-        return existing.device;
+        if (activate) _activateLocked(existing);
+        return existing;
       }
       _dropSessionLocked(existing);
     }
@@ -865,87 +844,68 @@ class FlipperClient {
       (_) => _emitSessions(),
     );
     // Active from the first moment of the attempt so the connecting phase is
-    // visible on the public streams (and cancellable from the UI).
-    _activateLocked(session);
+    // visible on the public streams (and cancellable from the UI). A caller
+    // that asked to keep the current session in front only gets that while it
+    // is actually connected; with nothing in front, the new link takes it.
+    final takesFront = activate || previous == null || !previous.isConnected;
+    if (takesFront) _activateLocked(session);
     try {
-      await session.establishLocked(autoRpc: autoRpc);
+      await session.establishLocked();
     } catch (error) {
       _dropSessionLocked(session);
-      _activateLocked(
-        (previous != null && previous.isConnected)
-            ? previous
-            : _mostRecentConnected(),
-      );
+      if (takesFront) {
+        _activateLocked(
+          (previous != null && previous.isConnected)
+              ? previous
+              : _mostRecentConnected(),
+        );
+      }
       rethrow;
     }
     if (device.isUsb) _ensureUsbPresenceWatch();
     _emitSessions();
-    return session.device;
+    return session;
   }
 
+  /// The one way into the firmware CLI of [device] (USB only).
+  ///
+  /// Whatever state the link is in, the channel comes back on a session that
+  /// is in CLI mode and held there: no link yet opens one; a session speaking
+  /// RPC is switched (the firmware has no RPC-to-CLI move, so that re-opens
+  /// the link); a session already in CLI is left exactly as it is. While the
+  /// channel is open, RPC on that session is refused with
+  /// [FlipperCliBusyError]; closing it hands the session back, to RPC by
+  /// default.
+  ///
+  /// A session that is already active stays active. When another device is
+  /// active and connected, it keeps the front and the CLI session runs warm
+  /// beside it, so the rest of the app carries on over the other link.
   Future<FlipperCliChannel> openCli(FlipperDevice device) {
+    if (!device.isUsb) {
+      return Future.error(
+        FlipperUnsupportedModeError('CLI mode is only available over USB'),
+      );
+    }
     return serialized(() async {
-      if (!device.isUsb) {
-        throw FlipperUnsupportedModeError(
-          'CLI mode is only available over USB',
-        );
-      }
-      final key = _deviceKey(device);
-      var session = _sessions[key];
-      final active = _active;
-      final keepActive =
-          active != null && !identical(active, session) && active.isConnected;
+      final held = _sessions[_deviceKey(device)];
+      final fresh = held == null || !(held.isConnected || held.isConnecting);
+      final session = await _openLocked(device, activate: false);
       final backlog = StringBuffer();
-      StreamSubscription<String>? tap;
-      if (session == null || !(session.isConnected || session.isConnecting)) {
-        if (session != null) _dropSessionLocked(session);
-        if (_sessions.length >= maxSessions) {
-          throw StateError(
-            'Only $maxSessions links can be held at once; disconnect one first',
-          );
-        }
-        session = FlipperSession(this, device);
-        _sessions[key] = session;
-        _sessionWatches[session] = session.connectionCtrl.stream.listen(
-          (_) => _emitSessions(),
-        );
-        tap = session.textCtrl.stream.listen(backlog.write);
-        if (!keepActive) {
-          _cliExclusive = true;
-          _activateLocked(session);
-        }
-        session.cliExclusive = true;
-        try {
-          await session.establishLocked(autoRpc: false);
+      final tap = session.textCtrl.stream.listen(backlog.write);
+      session.cliHeld = true;
+      try {
+        if (fresh) {
           await session.ensureCliPromptLocked();
-        } catch (error) {
-          await tap.cancel();
-          session.cliExclusive = false;
-          if (!keepActive) _cliExclusive = false;
-          _dropSessionLocked(session);
-          if (!keepActive) _activateLocked(_mostRecentConnected());
-          rethrow;
-        }
-        _ensureUsbPresenceWatch();
-      } else if (session.mode != FlipperMode.cli) {
-        final isActive = identical(_active, session);
-        tap = session.textCtrl.stream.listen(backlog.write);
-        session.cliExclusive = true;
-        if (isActive) _cliExclusive = true;
-        try {
+        } else if (session.mode != FlipperMode.cli) {
           await session.switchToCliLocked();
-        } catch (error) {
-          await tap.cancel();
-          session.cliExclusive = false;
-          if (isActive) _cliExclusive = false;
-          rethrow;
         }
-      } else {
-        session.cliExclusive = true;
-        if (identical(_active, session)) _cliExclusive = true;
+      } catch (error) {
+        session.cliHeld = false;
+        await tap.cancel();
+        rethrow;
       }
       final channel = FlipperCliChannel._(this, session, backlog.toString());
-      await tap?.cancel();
+      await tap.cancel();
       _emitSessions();
       return channel;
     });
@@ -955,10 +915,7 @@ class FlipperClient {
       _sessions[_deviceKey(device)]?.mode == FlipperMode.cli;
 
   /// Instantly reroutes all API calls and public streams to the live session
-  /// of [device] — no radio work. Throws when the device holds no session.
-  Future<void> activate(FlipperDevice device) =>
-      activateById(device.id, link: device.link);
-
+  /// of the device — no radio work. Throws when it holds no session.
   Future<void> activateById(String id, {FlipperLink? link}) {
     return serialized(() async {
       final session = _findSession(id, link: link);
@@ -1050,7 +1007,6 @@ class FlipperClient {
     _moveScope(session);
     if (session != null) {
       session.activationStamp = ++_activationSeq;
-      _cliExclusive = session.cliExclusive;
       _activePipes.addAll([
         session.connectionCtrl.stream.listen((event) {
           if (!connectionCtrl.isClosed) {
@@ -1240,17 +1196,6 @@ class FlipperClient {
     return session.switchToRpcMode();
   }
 
-  // Mode-restore entry point (UI lifecycle, e.g. a CLI page's dispose()).
-  // Unlike the RPC senders, it is lenient: if the session is already gone
-  // there is nothing to restore, so it returns quietly instead of throwing.
-  // Callers fire it unawaited, where a thrown "No active transport" would
-  // otherwise surface as an unhandled exception and crash the frame.
-  Future<void> enterRpcMode() {
-    final session = _currentSession;
-    if (session == null || session.transport == null) return Future.value();
-    return session.switchToRpcMode();
-  }
-
   Future<void> switchToCliMode() {
     final session = _currentSession;
     if (session == null) {
@@ -1258,8 +1203,6 @@ class FlipperClient {
     }
     return session.switchToCliMode();
   }
-
-  Future<void> enterCliMode() => switchToCliMode();
 
   Future<String> executeCli(
     String command, {
@@ -1506,9 +1449,8 @@ class FlipperCliChannel {
     _tap = null;
     unawaited(_textCtrl.close());
     return _client.serialized(() async {
-      _session.cliExclusive = false;
+      _session.cliHeld = false;
       final isActive = identical(_client._active, _session);
-      if (isActive) _client._cliExclusive = false;
       if (!_session.isConnected) return;
       if (isActive) {
         if (backToRpc && _session.transport != null) {

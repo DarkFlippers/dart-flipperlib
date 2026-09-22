@@ -4,6 +4,12 @@ class FlipperUnsupportedModeError extends StateError {
   FlipperUnsupportedModeError(super.message);
 }
 
+/// The session is held by an open CLI channel: RPC cannot be switched to until
+/// the channel closes.
+class FlipperCliBusyError extends StateError {
+  FlipperCliBusyError() : super('RPC switch blocked: CLI session is active');
+}
+
 /// Thrown by storageWriteChunked when the caller cancels the upload. The
 /// firmware's write stream has been closed cleanly with an empty final frame
 /// and the partial file deleted (best effort).

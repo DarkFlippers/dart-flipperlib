@@ -53,8 +53,7 @@ class FlipperSession {
   FlipperMode mode = FlipperMode.disconnected;
   Future<void>? _switchToRpcFuture;
   Future<void>? _deviceInfoFetch;
-  bool cliExclusive = false;
-  bool _autoRpc = true;
+  bool cliHeld = false;
   bool deviceInfoFetched = false;
   int _rxParseErrorStreak = 0;
   Future<void> _cliChain = Future.value();
@@ -111,8 +110,7 @@ class FlipperSession {
   // Opens a transport and commits the session. Runs on the client's lifecycle
   // chain; _reconnectLocked keeps the queue and the device-info cache alive
   // across re-establishment.
-  Future<FlipperDevice> establishLocked({bool autoRpc = true}) async {
-    _autoRpc = autoRpc;
+  Future<FlipperDevice> establishLocked() async {
     // A running scan competes with the connection for the radio. stopScan
     // returns once the platform scan is torn down; the settle then lets the
     // radio come free before the link is claimed.
@@ -172,13 +170,6 @@ class FlipperSession {
       ..reset()
       ..start();
     Log.info('[FlipperClient] connected to ${device.name}');
-    if (autoRpc && transport.supportsCli) {
-      unawaited(
-        switchToRpcMode().catchError((Object error) {
-          Log.error('[FlipperClient] automatic RPC switch failed: $error');
-        }),
-      );
-    }
     return device;
   }
 
@@ -291,6 +282,7 @@ class FlipperSession {
     _failStartedRequests(
       reason is Exception ? reason : StateError('Disconnected: $reason'),
     );
+    final wasRpc = mode == FlipperMode.rpc;
     _setMode(FlipperMode.disconnected, closeReason: reason, reconnecting: true);
     _signalWorker();
 
@@ -308,7 +300,7 @@ class FlipperSession {
     if (settleGen != _sessionGen) return;
 
     try {
-      await establishLocked(autoRpc: _autoRpc);
+      await establishLocked();
     } catch (error) {
       Log.error('[FlipperClient] reconnect failed: $error');
       await teardownLocked(reason);
@@ -329,6 +321,17 @@ class FlipperSession {
       return;
     }
     Log.info('[FlipperClient] reconnected to ${device.name}');
+    // The link came back in the transport's initial mode; a session that was
+    // speaking RPC when it dropped is put back there, so the requests that
+    // waited out the reconnect go out instead of waiting for a switch nobody
+    // else would issue.
+    if (wasRpc && !cliHeld) {
+      unawaited(
+        switchToRpcMode().catchError((Object error) {
+          Log.error('[FlipperClient] RPC restore after reconnect failed: $error');
+        }),
+      );
+    }
   }
 
   // Fails commands that already (partially) reached the wire — their
@@ -378,11 +381,7 @@ class FlipperSession {
   // ── Mode switching / CLI ───────────────────────────────────────────────────
 
   Future<void> switchToRpcMode() {
-    if (cliExclusive) {
-      return Future.error(
-        StateError('RPC switch blocked: CLI session is active'),
-      );
-    }
+    if (cliHeld) return Future.error(FlipperCliBusyError());
     if (mode == FlipperMode.rpc) return Future.value();
     final existing = _switchToRpcFuture;
     if (existing != null) return existing;
@@ -411,20 +410,13 @@ class FlipperSession {
   Future<void> _doSwitchToRpcMode() async {
     // Strict on entry: a real RPC sender (callRpcFrames / sendRpc switches
     // here) must fail fast when there is no transport at all, instead of
-    // enqueuing a request that can only time out. The lenient "already
-    // disconnected" handling lives in FlipperClient.enterRpcMode(), the
-    // mode-restore entry point.
+    // enqueuing a request that can only time out.
     //
     // Strict on entry only. The guards below return rather than throw when the
     // transport is swapped mid-handshake, because there the request should
-    // wait rather than fail: on a session opened with autoRpc, establishLocked
-    // starts a fresh switch on the new link and the worker dispatches the
-    // queue once that one lands.
-    //
-    // On a session opened for CLI it does not - _autoRpc is set once and never
-    // cleared - so switchToRpcMode can return with mode still cli, and the
-    // caller learns otherwise from the next request's own timeout rather than
-    // from here.
+    // wait rather than fail: a session that was in RPC when it dropped is put
+    // back there by _reconnectLocked, and the worker dispatches the queue once
+    // that switch lands.
     final transport = _requireTransport();
     if (mode == FlipperMode.rpc) return;
     if (!transport.supportsCli) {
@@ -496,10 +488,9 @@ class FlipperSession {
     if (mode == FlipperMode.cli) return;
 
     // The firmware offers no RPC->CLI switch; the session is recreated.
-    // autoRpc is off so the automatic RPC switch cannot race the CLI prompt.
     await teardownLocked('switching to CLI mode');
     try {
-      await establishLocked(autoRpc: false);
+      await establishLocked();
     } catch (error) {
       _client.onSessionEnded(this);
       rethrow;
