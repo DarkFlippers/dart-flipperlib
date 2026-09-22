@@ -127,6 +127,7 @@ class FlipperClient {
   final deviceInfoWatchCtrl = StreamController<Map<String, String>>.broadcast();
   final storageMutationCtrl = StreamController<void>.broadcast();
   final _sessionsCtrl = StreamController<List<FlipperSessionInfo>>.broadcast();
+  final _heardCtrl = StreamController<FlipperDevice>.broadcast();
 
   final Map<String, FlipperDevice> _devices = {};
   final Map<String, FlipperSession> _sessions = {};
@@ -215,6 +216,12 @@ class FlipperClient {
   /// Snapshot stream of every held link (active and warm). Emits on connect,
   /// disconnect, activation swap and any session state change.
   Stream<List<FlipperSessionInfo>> get sessionsStream => _sessionsCtrl.stream;
+
+  /// Every BLE device the radio actually heard from: an advertisement during
+  /// a scan, or a device the system reported as connected. Unlike
+  /// [devicesStream], which carries the accumulated list, each event here is
+  /// fresh evidence that the device is reachable right now.
+  Stream<FlipperDevice> get bleHeard => _heardCtrl.stream;
 
   // ── Facade state ───────────────────────────────────────────────────────────
 
@@ -514,7 +521,9 @@ class FlipperClient {
             'rssi=${discovered.rssi} services=${device.services}',
           );
         }
-        _rememberDevice(_fromDiscovered(discovered));
+        final heard = _fromDiscovered(discovered);
+        _rememberDevice(heard);
+        _heard(heard);
         if (_hasFilteredBleDevice()) _armScanGrace();
       };
 
@@ -558,6 +567,10 @@ class FlipperClient {
       }
       _emitDevices(immediate: true);
     }
+  }
+
+  void _heard(FlipperDevice device) {
+    if (!_heardCtrl.isClosed) _heardCtrl.add(device);
   }
 
   /// Ends scanning: cancels scans still queued behind the lifecycle chain and
@@ -619,7 +632,9 @@ class FlipperClient {
 
   Future<void> _loadKnownBleDevices() async {
     for (final device in await blePlatform.loadKnownDevices()) {
-      _rememberDevice(_fromDiscovered(device));
+      final known = _fromDiscovered(device);
+      _rememberDevice(known);
+      _heard(known);
     }
   }
 
@@ -1386,6 +1401,7 @@ class FlipperClient {
     await deviceInfoWatchCtrl.close();
     await storageMutationCtrl.close();
     await _sessionsCtrl.close();
+    await _heardCtrl.close();
   }
 }
 
