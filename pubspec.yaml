@@ -8,8 +8,12 @@ issue_tracker: https://github.com/DarkFlippers/dart-flipperlib/issues
 topics: [flipper-zero, ble, usb, embedded]
 
 environment:
-  sdk: ^3.11.1
-  flutter: ">=3.10.0"
+  # What this package is actually verified on. CI here runs on
+  # `channel: stable`, so the only version it has ever been green on is
+  # whatever stable is that day. Declaring 3.10 promises a window nobody has
+  # tested and nobody has built in.
+  sdk: ^3.13.1
+  flutter: ">=3.47.1"
 
 dependencies:
   flutter:

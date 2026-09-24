@@ -1248,9 +1248,8 @@ class FlipperClient {
     FlipperRequestPriority priority = FlipperRequestPriority.unattended,
     Duration sendTimeout = const Duration(seconds: 30),
   }) {
-    return _requireSessionFor(
-      priority,
-    ).sendRpc(message, priority: priority, sendTimeout: sendTimeout);
+    return _requireSessionFor(priority)
+        .sendRpc(message, priority: priority, sendTimeout: sendTimeout);
   }
 
   Future<List<Main>> callRpcFrames(
@@ -1280,9 +1279,8 @@ class FlipperClient {
     Duration timeout = const Duration(seconds: 60),
     FlipperRequestPriority priority = FlipperRequestPriority.unattended,
   }) {
-    return _requireSessionFor(
-      priority,
-    ).callRpcFramesMulti(body, timeout: timeout, priority: priority);
+    return _requireSessionFor(priority)
+        .callRpcFramesMulti(body, timeout: timeout, priority: priority);
   }
 
   Future<FlipperRpcBatch<T>> callRpc<T extends $pb.GeneratedMessage>(
