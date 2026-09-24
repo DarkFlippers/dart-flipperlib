@@ -147,65 +147,73 @@ final class LibusbConfigDescriptor extends Struct {
 typedef _InitNative = Int32 Function(Pointer<Pointer<LibusbContext>>);
 typedef LibusbInit = int Function(Pointer<Pointer<LibusbContext>>);
 
-typedef _InitContextNative =
-    Int32 Function(
-      Pointer<Pointer<LibusbContext>>,
-      Pointer<LibusbInitOption>,
-      Int32,
-    );
-typedef LibusbInitContext =
-    int Function(
-      Pointer<Pointer<LibusbContext>>,
-      Pointer<LibusbInitOption>,
-      int,
-    );
+typedef _InitContextNative = Int32 Function(
+  Pointer<Pointer<LibusbContext>>,
+  Pointer<LibusbInitOption>,
+  Int32,
+);
+typedef LibusbInitContext = int Function(
+  Pointer<Pointer<LibusbContext>>,
+  Pointer<LibusbInitOption>,
+  int,
+);
 
 typedef _ExitNative = Void Function(Pointer<LibusbContext>);
 typedef LibusbExit = void Function(Pointer<LibusbContext>);
 
-typedef _WrapSysDeviceNative =
-    Int32 Function(
-      Pointer<LibusbContext>,
-      IntPtr,
-      Pointer<Pointer<LibusbDeviceHandle>>,
-    );
-typedef LibusbWrapSysDevice =
-    int Function(
-      Pointer<LibusbContext>,
-      int,
-      Pointer<Pointer<LibusbDeviceHandle>>,
-    );
+typedef _WrapSysDeviceNative = Int32 Function(
+  Pointer<LibusbContext>,
+  IntPtr,
+  Pointer<Pointer<LibusbDeviceHandle>>,
+);
+typedef LibusbWrapSysDevice = int Function(
+  Pointer<LibusbContext>,
+  int,
+  Pointer<Pointer<LibusbDeviceHandle>>,
+);
 
-typedef _GetDeviceNative =
-    Pointer<LibusbDevice> Function(Pointer<LibusbDeviceHandle>);
-typedef LibusbGetDevice =
-    Pointer<LibusbDevice> Function(Pointer<LibusbDeviceHandle>);
+typedef _GetDeviceNative = Pointer<LibusbDevice> Function(
+  Pointer<LibusbDeviceHandle>,
+);
+typedef LibusbGetDevice = Pointer<LibusbDevice> Function(
+  Pointer<LibusbDeviceHandle>,
+);
 
-typedef _GetDeviceListNative =
-    IntPtr Function(
-      Pointer<LibusbContext>,
-      Pointer<Pointer<Pointer<LibusbDevice>>>,
-    );
-typedef LibusbGetDeviceList =
-    int Function(
-      Pointer<LibusbContext>,
-      Pointer<Pointer<Pointer<LibusbDevice>>>,
-    );
+typedef _GetDeviceListNative = IntPtr Function(
+  Pointer<LibusbContext>,
+  Pointer<Pointer<Pointer<LibusbDevice>>>,
+);
+typedef LibusbGetDeviceList = int Function(
+  Pointer<LibusbContext>,
+  Pointer<Pointer<Pointer<LibusbDevice>>>,
+);
 
-typedef _FreeDeviceListNative =
-    Void Function(Pointer<Pointer<LibusbDevice>>, Int32);
-typedef LibusbFreeDeviceList =
-    void Function(Pointer<Pointer<LibusbDevice>>, int);
+typedef _FreeDeviceListNative = Void Function(
+  Pointer<Pointer<LibusbDevice>>,
+  Int32,
+);
+typedef LibusbFreeDeviceList = void Function(
+  Pointer<Pointer<LibusbDevice>>,
+  int,
+);
 
-typedef _GetDeviceDescriptorNative =
-    Int32 Function(Pointer<LibusbDevice>, Pointer<LibusbDeviceDescriptor>);
-typedef LibusbGetDeviceDescriptor =
-    int Function(Pointer<LibusbDevice>, Pointer<LibusbDeviceDescriptor>);
+typedef _GetDeviceDescriptorNative = Int32 Function(
+  Pointer<LibusbDevice>,
+  Pointer<LibusbDeviceDescriptor>,
+);
+typedef LibusbGetDeviceDescriptor = int Function(
+  Pointer<LibusbDevice>,
+  Pointer<LibusbDeviceDescriptor>,
+);
 
-typedef _OpenNative =
-    Int32 Function(Pointer<LibusbDevice>, Pointer<Pointer<LibusbDeviceHandle>>);
-typedef LibusbOpen =
-    int Function(Pointer<LibusbDevice>, Pointer<Pointer<LibusbDeviceHandle>>);
+typedef _OpenNative = Int32 Function(
+  Pointer<LibusbDevice>,
+  Pointer<Pointer<LibusbDeviceHandle>>,
+);
+typedef LibusbOpen = int Function(
+  Pointer<LibusbDevice>,
+  Pointer<Pointer<LibusbDeviceHandle>>,
+);
 
 typedef _CloseNative = Void Function(Pointer<LibusbDeviceHandle>);
 typedef LibusbClose = void Function(Pointer<LibusbDeviceHandle>);
@@ -213,65 +221,77 @@ typedef LibusbClose = void Function(Pointer<LibusbDeviceHandle>);
 typedef _ClaimNative = Int32 Function(Pointer<LibusbDeviceHandle>, Int32);
 typedef LibusbClaim = int Function(Pointer<LibusbDeviceHandle>, int);
 
-typedef _SetAltNative =
-    Int32 Function(Pointer<LibusbDeviceHandle>, Int32, Int32);
+typedef _SetAltNative = Int32 Function(
+  Pointer<LibusbDeviceHandle>,
+  Int32,
+  Int32,
+);
 typedef LibusbSetAlt = int Function(Pointer<LibusbDeviceHandle>, int, int);
 
-typedef _ControlTransferNative =
-    Int32 Function(
-      Pointer<LibusbDeviceHandle>,
-      Uint8,
-      Uint8,
-      Uint16,
-      Uint16,
-      Pointer<Uint8>,
-      Uint16,
-      Uint32,
-    );
-typedef LibusbControlTransfer =
-    int Function(
-      Pointer<LibusbDeviceHandle>,
-      int,
-      int,
-      int,
-      int,
-      Pointer<Uint8>,
-      int,
-      int,
-    );
+typedef _ControlTransferNative = Int32 Function(
+  Pointer<LibusbDeviceHandle>,
+  Uint8,
+  Uint8,
+  Uint16,
+  Uint16,
+  Pointer<Uint8>,
+  Uint16,
+  Uint32,
+);
+typedef LibusbControlTransfer = int Function(
+  Pointer<LibusbDeviceHandle>,
+  int,
+  int,
+  int,
+  int,
+  Pointer<Uint8>,
+  int,
+  int,
+);
 
-typedef _GetConfigDescriptorNative =
-    Int32 Function(
-      Pointer<LibusbDevice>,
-      Uint8,
-      Pointer<Pointer<LibusbConfigDescriptor>>,
-    );
-typedef LibusbGetConfigDescriptor =
-    int Function(
-      Pointer<LibusbDevice>,
-      int,
-      Pointer<Pointer<LibusbConfigDescriptor>>,
-    );
+typedef _GetConfigDescriptorNative = Int32 Function(
+  Pointer<LibusbDevice>,
+  Uint8,
+  Pointer<Pointer<LibusbConfigDescriptor>>,
+);
+typedef LibusbGetConfigDescriptor = int Function(
+  Pointer<LibusbDevice>,
+  int,
+  Pointer<Pointer<LibusbConfigDescriptor>>,
+);
 
-typedef _FreeConfigDescriptorNative =
-    Void Function(Pointer<LibusbConfigDescriptor>);
-typedef LibusbFreeConfigDescriptor =
-    void Function(Pointer<LibusbConfigDescriptor>);
+typedef _FreeConfigDescriptorNative = Void Function(
+  Pointer<LibusbConfigDescriptor>,
+);
+typedef LibusbFreeConfigDescriptor = void Function(
+  Pointer<LibusbConfigDescriptor>,
+);
 
-typedef _GetStringDescriptorAsciiNative =
-    Int32 Function(Pointer<LibusbDeviceHandle>, Uint8, Pointer<Uint8>, Int32);
-typedef LibusbGetStringDescriptorAscii =
-    int Function(Pointer<LibusbDeviceHandle>, int, Pointer<Uint8>, int);
+typedef _GetStringDescriptorAsciiNative = Int32 Function(
+  Pointer<LibusbDeviceHandle>,
+  Uint8,
+  Pointer<Uint8>,
+  Int32,
+);
+typedef LibusbGetStringDescriptorAscii = int Function(
+  Pointer<LibusbDeviceHandle>,
+  int,
+  Pointer<Uint8>,
+  int,
+);
 
 typedef _ErrorNameNative = Pointer<Utf8> Function(Int32);
 typedef LibusbErrorName = Pointer<Utf8> Function(int);
 
-typedef _SetAutoDetachNative =
-    Int32 Function(Pointer<LibusbDeviceHandle>, Int32);
+typedef _SetAutoDetachNative = Int32 Function(
+  Pointer<LibusbDeviceHandle>,
+  Int32,
+);
 typedef LibusbSetAutoDetach = int Function(Pointer<LibusbDeviceHandle>, int);
 
-typedef _RefDeviceNative =
-    Pointer<LibusbDevice> Function(Pointer<LibusbDevice>);
+typedef _RefDeviceNative = Pointer<LibusbDevice> Function(
+  Pointer<LibusbDevice>,
+);
 typedef LibusbRefDevice = Pointer<LibusbDevice> Function(Pointer<LibusbDevice>);
 
 typedef _UnrefDeviceNative = Void Function(Pointer<LibusbDevice>);
