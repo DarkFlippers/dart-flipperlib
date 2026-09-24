@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   analyze:
-    name: Format and analyze (pinned)
+    name: Format, analyze and test (pinned)
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -44,6 +44,9 @@ jobs:
       - name: Analyze
         run: flutter analyze
 
+      - name: Test
+        run: flutter test
+
   canary:
     # The next Flutter release, before it is anyone's problem. pubspec names
     # the floor this package is verified on; this says whether the ceiling has
@@ -52,7 +55,7 @@ jobs:
     # Not blocking on purpose. A failure here is news about the SDK, not a
     # defect in whichever pull request happened to run it - and a canary that
     # holds the branch is a hostage, not a warning.
-    name: Format and analyze (latest stable)
+    name: Format, analyze and test (latest stable)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     continue-on-error: true
@@ -77,3 +80,6 @@ jobs:
 
       - name: Analyze
         run: flutter analyze
+
+      - name: Test
+        run: flutter test
