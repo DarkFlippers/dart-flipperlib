@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   analyze:
-    name: Format and analyze
+    name: Format and analyze (pinned)
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -24,6 +24,45 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          # Pinned, because pubspec declares a floor and something has to hold
+          # it. The canary job below watches the ceiling.
+          flutter-version: 3.47.1
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed .
+
+      # flutter analyze treats info-level issues as fatal by default, so the
+      # lints above fail the job without any extra flag.
+      - name: Analyze
+        run: flutter analyze
+
+  canary:
+    # The next Flutter release, before it is anyone's problem. pubspec names
+    # the floor this package is verified on; this says whether the ceiling has
+    # moved.
+    #
+    # Not blocking on purpose. A failure here is news about the SDK, not a
+    # defect in whichever pull request happened to run it - and a canary that
+    # holds the branch is a hostage, not a warning.
+    name: Format and analyze (latest stable)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # No flutter-version: omitting it is what asks for the newest on the
+      # channel. An empty string is not the same thing.
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -36,7 +75,5 @@ jobs:
       - name: Check formatting
         run: dart format --output=none --set-exit-if-changed .
 
-      # flutter analyze treats info-level issues as fatal by default, so the
-      # lints above fail the job without any extra flag.
       - name: Analyze
         run: flutter analyze
