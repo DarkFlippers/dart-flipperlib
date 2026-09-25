@@ -70,6 +70,18 @@ class DeviceToken {
 class FlipperSessionBinding {
   const FlipperSessionBinding._(this._session);
 
+  /// A binding to no session.
+  ///
+  /// The state [FlipperClient.bindCurrentSession] already returns when nothing
+  /// is connected, named so that it can be constructed. A consumer's fake
+  /// client has no session to bind and no way to reach the private
+  /// constructor, which left every caller of `bindCurrentSession` untestable
+  /// from outside this package.
+  ///
+  /// [isAlive] is false and [run] binds requests to nothing - the same shape a
+  /// caller reaches when the link goes away between binding and running.
+  const FlipperSessionBinding.unbound() : _session = null;
+
   final FlipperSession? _session;
 
   FlipperDevice? get device => _session?.device;
