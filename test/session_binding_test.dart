@@ -11,6 +11,20 @@ import 'package:flutter_test/flutter_test.dart';
 /// caller can reason about without one - which is also the half a consumer's
 /// test now needs, since a fake client has to return a binding from
 /// `bindCurrentSession` and had no way to build one.
+/// Enough of a discovered device to build a [FlipperDevice] with.
+class _Discovered implements DiscoveredDevice {
+  const _Discovered(this.id);
+
+  @override
+  final String id;
+
+  @override
+  String get name => id;
+
+  @override
+  DeviceTransport get transport => DeviceTransport.usb;
+}
+
 void main() {
   group('a binding to nothing', () {
     const binding = FlipperSessionBinding.unbound();
@@ -35,6 +49,31 @@ void main() {
         ),
         isTrue,
       );
+    });
+  });
+
+  group('a binding that names a device', () {
+    final target = FlipperDevice(
+      id: 'A',
+      name: 'Kitchen',
+      link: FlipperLink.usb,
+      source: _Discovered('A'),
+    );
+    final binding = FlipperSessionBinding.to(target);
+
+    test('reports it', () {
+      expect(binding.device, same(target));
+    });
+
+    test('is alive', () {
+      expect(binding.isAlive, isTrue);
+    });
+
+    // It describes a device; it does not stand in for a session. A caller
+    // that reads `device` to decide what to do gets an answer; a request made
+    // inside `run` is bound to nothing, because there is nothing to bind to.
+    test('still runs a body, and still returns its value', () {
+      expect(binding.run(() => 'ran'), 'ran');
     });
   });
 

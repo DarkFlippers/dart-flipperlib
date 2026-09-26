@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:protobuf/protobuf.dart' as $pb;
 import 'package:universal_ble/universal_ble.dart' as uble;
 
@@ -68,7 +69,7 @@ class DeviceToken {
 /// command has to reach the Flipper the stream runs on rather than the one that
 /// happens to be on screen when the page closes.
 class FlipperSessionBinding {
-  const FlipperSessionBinding._(this._session);
+  const FlipperSessionBinding._(this._session) : _device = null, _alive = null;
 
   /// A binding to no session.
   ///
@@ -80,15 +81,41 @@ class FlipperSessionBinding {
   ///
   /// [isAlive] is false and [run] binds requests to nothing - the same shape a
   /// caller reaches when the link goes away between binding and running.
-  const FlipperSessionBinding.unbound() : _session = null;
+  const FlipperSessionBinding.unbound()
+    : _session = null,
+      _device = null,
+      _alive = null;
+
+  /// A binding that names [device] without holding a session to it.
+  ///
+  /// For a consumer's test. [FlipperClient.bindCurrentSession] is on the path
+  /// of anything that has to go on reaching the Flipper it started against -
+  /// a firmware install, an emulation - and those callers read [device] and
+  /// [isAlive] to decide what to do. A fake client can return
+  /// [FlipperSessionBinding.unbound], but that names no device, so the branch
+  /// where there *is* one cannot be reached at all.
+  ///
+  /// [run] still binds requests to nothing, because there is nothing to bind
+  /// them to. This describes a device; it does not stand in for a session.
+  ///
+  /// Always [isAlive]. A binding whose link went away is a different shape -
+  /// a device that is named and unreachable - and nothing needs to build one
+  /// yet; [FlipperSessionBinding.unbound] covers "no device" on its own.
+  @visibleForTesting
+  const FlipperSessionBinding.to(FlipperDevice device)
+    : _session = null,
+      _device = device,
+      _alive = true;
 
   final FlipperSession? _session;
+  final FlipperDevice? _device;
+  final bool? _alive;
 
-  FlipperDevice? get device => _session?.device;
+  FlipperDevice? get device => _device ?? _session?.device;
 
   /// False once the bound link is gone. Requests made under a dead binding
   /// fail; they never retarget the device that is active now.
-  bool get isAlive => _session?.isConnected ?? false;
+  bool get isAlive => _alive ?? _session?.isConnected ?? false;
 
   /// Runs [body] with every request it makes bound to this session.
   T run<T>(T Function() body) =>
