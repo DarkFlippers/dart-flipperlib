@@ -42,12 +42,30 @@ class _TaskBinding {
 /// and complete *there*, while what the app records about it is still dropped,
 /// because the screen describes a different one now.
 class DeviceToken {
-  const DeviceToken._(this._client, this._revision);
+  const DeviceToken._(this._client, this._revision) : _fixed = null;
 
-  final FlipperClient _client;
+  /// A token that answers [isCurrent] with [current], whatever happens.
+  ///
+  /// For a consumer's test. [FlipperClient.deviceToken] is not nullable and
+  /// the real token is built from the client's own revision counter, so a
+  /// fake client cannot answer the getter at all - which makes every caller
+  /// of it untestable from outside this package, not only the branch that
+  /// reads a stale one.
+  ///
+  /// The two cases are the whole of what a caller does with a token: this is
+  /// still the Flipper I was working with, or it is not.
+  @visibleForTesting
+  const DeviceToken.fixed({required bool current})
+    : _client = null,
+      _revision = 0,
+      _fixed = current;
+
+  final FlipperClient? _client;
   final int _revision;
+  final bool? _fixed;
 
-  bool get isCurrent => _revision == _client._deviceRevision;
+  bool get isCurrent =>
+      _fixed ?? (_client != null && _revision == _client._deviceRevision);
 
   bool get isStale => !isCurrent;
 
@@ -55,10 +73,11 @@ class DeviceToken {
   bool operator ==(Object other) =>
       other is DeviceToken &&
       identical(other._client, _client) &&
-      other._revision == _revision;
+      other._revision == _revision &&
+      other._fixed == _fixed;
 
   @override
-  int get hashCode => Object.hash(identityHashCode(_client), _revision);
+  int get hashCode => Object.hash(identityHashCode(_client), _revision, _fixed);
 }
 
 /// The session a task talks to, held so it can go on talking to it after the
