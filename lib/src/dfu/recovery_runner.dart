@@ -121,9 +121,30 @@ class RecoveryProgress extends RecoveryMessage {
   final double percent; // 0..100
 }
 
+/// How much a [RecoveryLog] line matters to whoever reads the log later.
+enum RecoveryLogLevel {
+  /// What the run is doing. Most lines are this.
+  progress,
+
+  /// Something did not work and the run carried on anyway.
+  ///
+  /// The distinction is not cosmetic: recovery runs in a spawned isolate, so
+  /// the consumer's logger is not reachable from here and these messages are
+  /// the only way a failure crosses back. A consumer that files every line as
+  /// commentary files these ones there too - and a radio stack that did not
+  /// flash is the difference between a working Flipper and one whose BLE is
+  /// quietly broken.
+  warning,
+}
+
 class RecoveryLog extends RecoveryMessage {
-  const RecoveryLog(this.message);
+  const RecoveryLog(this.message, {this.level = RecoveryLogLevel.progress});
+
+  /// A line the run carried on past rather than stopped for.
+  const RecoveryLog.warning(this.message) : level = RecoveryLogLevel.warning;
+
   final String message;
+  final RecoveryLogLevel level;
 }
 
 class RecoveryDone extends RecoveryMessage {
@@ -277,7 +298,11 @@ Future<void> _runRecovery(
     } on DfuHostException {
       rethrow;
     } catch (e) {
-      send(RecoveryLog('Radio flash failed ($e); continuing with firmware'));
+      send(
+        RecoveryLog.warning(
+          'Radio flash failed ($e); continuing with firmware',
+        ),
+      );
     }
   }
   send(const RecoveryProgress(RecoveryStep.flashingRadio, 100));
@@ -414,7 +439,9 @@ Future<void> _flashWirelessStack(
       await Future<void>.delayed(_pollInterval);
       ok = await _checkWirelessStack(backend, send);
       if (!ok) {
-        send(const RecoveryLog('Wireless stack check failed, retrying'));
+        send(
+          const RecoveryLog.warning('Wireless stack check failed, retrying'),
+        );
       }
     }
     if (ok) return;
@@ -423,7 +450,9 @@ Future<void> _flashWirelessStack(
         'Could not install wireless stack after several tries, giving up',
       );
     }
-    send(const RecoveryLog('Wireless stack installation failed, retrying'));
+    send(
+      const RecoveryLog.warning('Wireless stack installation failed, retrying'),
+    );
   }
 }
 
@@ -447,7 +476,7 @@ Future<void> _startFus(
       if (!dev.leave()) throw StateError('Failed to leave DFU mode');
     } else if (state.status == FusStatus.errorOccured &&
         state.error == FusError.notRunning) {
-      send(RecoveryLog('FUS appears not to be running: $state'));
+      send(RecoveryLog.warning('FUS appears not to be running: $state'));
       dev.fusGetState();
     } else {
       throw StateError('Unexpected FUS state: $state');
