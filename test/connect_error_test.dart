@@ -49,6 +49,68 @@ void main() {
     }
   });
 
+  /// This library's own cap, and the one kind here that does not come from a
+  /// platform BLE stack. Until qUnleashed#120 it hit no needle at all - `too
+  /// many` is not in the sentence and `disconnect one first` does not contain
+  /// `disconnected` - so it fell through to `unknown` and the user was told
+  /// only that the connection failed, with no mention of the link they would
+  /// have to let go of.
+  group('this library running out of links', () {
+    // The anchor. Everything else here is a hand-written approximation of
+    // what `_connectLocked` throws; this is the string itself, so rewording
+    // it fails here rather than silently going back to `unknown`.
+    test('is read from the message the client actually throws', () {
+      expect(
+        classifyConnectError(FlipperClient.sessionLimitMessage),
+        FlipperConnectErrorKind.sessionLimit,
+      );
+    });
+
+    // Which is how it arrives: callers classify the caught object, and
+    // StateError wraps the message in "Bad state: ...".
+    test('survives being wrapped in a StateError', () {
+      expect(
+        classifyConnectError(StateError(FlipperClient.sessionLimitMessage)),
+        FlipperConnectErrorKind.sessionLimit,
+      );
+    });
+
+    for (final message in const [
+      'Only 2 links can be held at once; disconnect one first',
+      'Bad state: Only 4 links can be held at once; disconnect one first',
+    ]) {
+      test('is read from "$message"', () {
+        expect(
+          classifyConnectError(message),
+          FlipperConnectErrorKind.sessionLimit,
+        );
+      });
+    }
+
+    // The near-miss that made this fall through for so long: `deviceUnreachable`
+    // matches `disconnected`, and the sentence says `disconnect one first`.
+    test('is not read as the device being unreachable', () {
+      expect(
+        classifyConnectError(FlipperClient.sessionLimitMessage),
+        isNot(FlipperConnectErrorKind.deviceUnreachable),
+      );
+    });
+
+    // The order of the two "no room" blocks is the behaviour. They have
+    // different fixes - unpair something in system settings, versus let a
+    // link go in the picker - so one must not absorb the other.
+    test('is not the OS pairing limit', () {
+      expect(
+        classifyConnectError(FlipperClient.sessionLimitMessage),
+        isNot(FlipperConnectErrorKind.tooManyDevices),
+      );
+      expect(
+        classifyConnectError('too many paired devices'),
+        FlipperConnectErrorKind.tooManyDevices,
+      );
+    });
+  });
+
   group('bluetooth being unavailable', () {
     for (final message in const [
       'BluetoothNotEnabled',

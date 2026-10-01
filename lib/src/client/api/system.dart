@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../../../protobuf.dart';
+import '../../common/log.dart';
 import '../../model/device.dart';
 import '../../model/enums.dart';
 import '../client.dart';
@@ -125,13 +126,27 @@ extension FlipperSystemApi on FlipperClient {
     );
   }
 
+  /// Asks the Flipper to reboot, then lets the link go.
+  ///
+  /// Deliberately fire-and-forget: a Flipper that obeys stops answering
+  /// mid-request, so awaiting the reply means waiting out the timeout on
+  /// every successful reboot. The disconnect follows either way.
+  ///
+  /// The cost is that a *refused* reboot looks the same as an obeyed one from
+  /// outside - firmware answers ERROR_APP_SYSTEM_LOCKED while an app is
+  /// running, or ERROR_BUSY, and the caller still sees its link go away. This
+  /// line is the only record that the device did not reboot; nothing above
+  /// can report it without changing this method's shape. qUnleashed#120.
   Future<void> reboot(RebootRequest request) async {
     unawaited(
       callRpcFrames(
         Main(systemRebootRequest: request),
         timeout: const Duration(seconds: 5),
         priority: FlipperRequestPriority.rightNow,
-      ).catchError((_) => <Main>[]),
+      ).catchError((Object e) {
+        Log.warn('[System] reboot was not accepted: $e');
+        return <Main>[];
+      }),
     );
     await Future<void>.delayed(const Duration(milliseconds: 250));
     await disconnect();

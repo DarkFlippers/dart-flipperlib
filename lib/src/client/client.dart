@@ -207,6 +207,15 @@ class FlipperClient {
   bool autoReconnect = true;
   static const int maxSessions = 2;
 
+  /// What `_connectLocked` throws once [maxSessions] links are held.
+  ///
+  /// A constant rather than a literal at the throw site because
+  /// `classifyConnectError` matches substrings of it, and a test there reads
+  /// this - so rewording it fails that test instead of silently falling
+  /// through to `unknown`, which is what it did until qUnleashed#120.
+  static const String sessionLimitMessage =
+      'Only $maxSessions links can be held at once; disconnect one first';
+
   StreamSubscription<void>? _usbPresenceSub;
 
   bool _scanning = false;
@@ -906,9 +915,7 @@ class FlipperClient {
       _dropSessionLocked(existing);
     }
     if (_sessions.length >= maxSessions) {
-      throw StateError(
-        'Only $maxSessions links can be held at once; disconnect one first',
-      );
+      throw StateError(sessionLimitMessage);
     }
     final previous = _active;
     final session = FlipperSession(this, device);
