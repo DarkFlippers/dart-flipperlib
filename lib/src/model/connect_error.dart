@@ -6,6 +6,16 @@ enum FlipperConnectErrorKind {
   bluetoothUnavailable,
   deviceUnreachable,
   tooManyDevices,
+
+  /// This library's own cap on held links, not the platform's.
+  ///
+  /// [FlipperClient.maxSessions] links may be held at once, and the
+  /// [StateError] saying so is the only one in this enum that comes from here
+  /// rather than from a BLE stack. It is separate from [tooManyDevices]
+  /// because the two have different fixes: the OS pairing limit wants devices
+  /// unpaired in system settings, this one wants a link let go of in the
+  /// picker. qUnleashed#120.
+  sessionLimit,
   busy,
   unknown,
 }
@@ -25,6 +35,14 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
     'bonding keys mismatch',
   ])) {
     return FlipperConnectErrorKind.stalePairing;
+  }
+  // Before tooManyDevices, and deliberately: both are "no room for another
+  // one", and only this one can be fixed from inside the app. The needles
+  // come from FlipperClient.sessionLimitMessage, which is what
+  // `_connectLocked` throws - `connect_error_test.dart` classifies that exact
+  // string, so rewording it fails there rather than here.
+  if (has(['links can be held', 'disconnect one first'])) {
+    return FlipperConnectErrorKind.sessionLimit;
   }
   if (has([
     'connectionlimitexceeded',
