@@ -25,6 +25,9 @@ abstract class UniversalBleTransportBase extends Transport {
   // (prepare/execute), which this firmware handles far worse. The negotiated
   // MTU is therefore clamped here instead of being trusted.
   static const int maxBleMtuSize = 411;
+  // The largest ATT_MTU the spec allows. Asking for it concedes nothing: the
+  // peer answers with what it will carry, and the clamp above bounds that.
+  static const int _requestedMtu = 517;
   // Bound for the unencrypted GATT setup steps (MTU negotiation, service
   // discovery).
   static const Duration _gattOpTimeout = Duration(seconds: 15);
@@ -73,9 +76,9 @@ abstract class UniversalBleTransportBase extends Transport {
     String deviceId,
     String charId,
     Uint8List value,
-    int? mtu,
+    int? timestamp,
   ) {
-    _liveByDevice[deviceId]?._onValueChange(deviceId, charId, value, mtu);
+    _liveByDevice[deviceId]?._onValueChange(deviceId, charId, value, timestamp);
   }
 
   // Aborts whatever platform connect is currently in flight, if any. Lets a
@@ -93,6 +96,9 @@ abstract class UniversalBleTransportBase extends Transport {
   late final bool _txWithResponse;
   late final bool _rxUsesIndicate;
   late int bleMtuSize;
+  // Last reading, kept so a failed re-read falls back to it rather than to the
+  // 23-byte default. 23 is the pre-negotiation ATT_MTU every link starts at.
+  int _negotiatedMtu = 23;
 
   String? _overflowSvcId;
   String? _overflowCharId;
@@ -157,9 +163,24 @@ abstract class UniversalBleTransportBase extends Transport {
 
   UniversalBleTransportBase(this._device, this._ops);
 
-  // Platform hook that runs after all subscriptions are in place
-  // (macOS: connection-parameter settle).
-  Future<void> openExtra() async {}
+  /// How long to wait after the subscriptions are in place before any RPC
+  /// traffic starts.
+  ///
+  /// Apple opens a link at a conservative connection interval (around 100 ms)
+  /// and shortens it only when the peripheral asks. The firmware does ask, with
+  /// an L2CAP Connection Parameter Update Request, and Apple accepts it -
+  /// typically settling at 15-30 ms. The pause lets that request land before
+  /// RPC traffic competes with it; btleplug uses the same 300 ms for the same
+  /// reason. Harmless where it is not needed, which is why it is a duration a
+  /// platform declares rather than a method it overrides.
+  Duration get connectSettle => Duration.zero;
+
+  // Platform hook that runs after all subscriptions are in place.
+  Future<void> openExtra() async {
+    if (connectSettle <= Duration.zero) return;
+    await Future<void>.delayed(connectSettle);
+    Log.info('[BLE] connection parameter settle complete');
+  }
 
   // Aborts this transport's in-flight platform connect: wakes the connect race
   // in configure and tells the platform to stop the pending connection so
@@ -241,14 +262,44 @@ abstract class UniversalBleTransportBase extends Transport {
     }
   }
 
-  Future<void> configureConnected(String deviceId) async {
-    int negotiatedMtu = 23;
+  Future<int> _requestMtu(String deviceId) =>
+      _ops.requestMtu(deviceId, _requestedMtu).timeout(_gattOpTimeout);
+
+  /// Sizes writes from the MTU, read after service discovery.
+  ///
+  /// It has to be read *after* discovery, and on Apple it has to be read
+  /// again. `requestMtu` only requests on Android; CoreBluetooth negotiates on
+  /// the link's behalf, asynchronously after connect, and universal_ble's
+  /// Darwin plugin answers the call out of `maximumWriteValueLength`
+  /// (`UniversalBlePlugin.swift`). Asked before that exchange settles it
+  /// reports the 23-byte default, and the clamp turns that into a 20-byte
+  /// write payload for the life of the link, with every message cut to it.
+  /// Service discovery is ATT traffic queued behind the exchange, so by the
+  /// time it returns the figure is real.
+  ///
+  /// Takes the new reading rather than the larger of the two, because this also
+  /// runs after a pairing reconnect, where the previous link's figure is not
+  /// just stale but dangerous: a payload above the new link's ATT MTU is
+  /// silently promoted to a long write, which this firmware handles far worse
+  /// than more short ones. [maxBleMtuSize] bounds it from above for the same
+  /// reason.
+  Future<void> _applyMtu(String deviceId) async {
     try {
-      negotiatedMtu = await _ops
-          .requestMtu(deviceId, 517)
-          .timeout(_gattOpTimeout);
+      _negotiatedMtu = await _requestMtu(deviceId);
     } catch (e) {
-      Log.error('[BLE] requestMtu failed: $e (using default $negotiatedMtu)');
+      Log.warn('[BLE] MTU read failed: $e (keeping $_negotiatedMtu)');
+    }
+    bleMtuSize = (_negotiatedMtu - 3).clamp(_minBleMtuSize, maxBleMtuSize);
+  }
+
+  Future<void> configureConnected(String deviceId) async {
+    // Android grants the MTU when asked, and wants asking before the traffic
+    // that benefits - discovery included. Apple ignores the request and reports
+    // whatever it has so far, which is why _applyMtu reads it again below.
+    try {
+      _negotiatedMtu = await _requestMtu(deviceId);
+    } catch (e) {
+      Log.error('[BLE] requestMtu failed: $e (using default $_negotiatedMtu)');
     }
 
     // Every GATT step is bounded: a platform stack that never answers (a
@@ -322,7 +373,20 @@ abstract class UniversalBleTransportBase extends Transport {
     _rxCharId = rxChar!;
     _txWithResponse = txWithResponse;
     _rxUsesIndicate = rxUsesIndicate;
-    bleMtuSize = (negotiatedMtu - 3).clamp(_minBleMtuSize, maxBleMtuSize);
+    // Only read again when the first reading could still be improved on. A
+    // reading that already saturates the clamp cannot be, and asking anyway is
+    // not free on Android: universal_ble's own note is that the first GATT
+    // client drives the MTU and "subsequent requests ignored", while its plugin
+    // parks the callback without checking that the stack accepted the repeat -
+    // so a second ask can sit on the *global* command queue until it times out,
+    // holding up the subscribes queued behind it. Android grants the firmware's
+    // 414 ceiling on the first ask and so never takes this path; Apple reports
+    // 23 until the exchange settles and always does.
+    if (_negotiatedMtu - 3 >= maxBleMtuSize) {
+      bleMtuSize = maxBleMtuSize;
+    } else {
+      await _applyMtu(deviceId);
+    }
     _overflowSvcId = overflowSvc;
     _overflowCharId = overflowChar;
     _rpcStatusSvcId = rpcStatusSvc;
@@ -331,7 +395,7 @@ abstract class UniversalBleTransportBase extends Transport {
     _overflowCharIdLower = _overflowCharId!.toLowerCase();
     _rpcStatusCharIdLower = _rpcStatusCharId!.toLowerCase();
     Log.info(
-      '[BLE] configured: negotiatedMtu=$negotiatedMtu mtu=$bleMtuSize '
+      '[BLE] configured: negotiatedMtu=$_negotiatedMtu mtu=$bleMtuSize '
       'txWithResponse=$_txWithResponse',
     );
   }
@@ -660,6 +724,11 @@ abstract class UniversalBleTransportBase extends Transport {
         Log.error('[BLE] pairing reconnect: discoverServices failed: $e');
         continue;
       }
+      // This is a different link from the one configure measured, so its MTU is
+      // measured again. Keeping the old figure is not merely stale: if the new
+      // link settles lower, every write sits above its ATT MTU and is promoted
+      // to a long write.
+      await _applyMtu(deviceId);
       _link = BleLinkState.connected;
       return true;
     }
@@ -794,7 +863,7 @@ abstract class UniversalBleTransportBase extends Transport {
     String deviceId,
     String charId,
     Uint8List value,
-    int? mtu,
+    int? timestamp,
   ) {
     if (deviceId != _device.device.deviceId) return;
     final lower = charId.toLowerCase();

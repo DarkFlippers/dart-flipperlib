@@ -54,30 +54,13 @@ class MacosBleTransport extends UniversalBleTransportBase {
   MacosBleTransport._(BleDiscoveredDevice device)
     : super(device, UniversalBleOps());
 
+  @override
+  Duration get connectSettle => const Duration(milliseconds: 300);
+
   static Future<MacosBleTransport> create(BleDiscoveredDevice device) async {
     final transport = MacosBleTransport._(device);
     // configure releases the platform link itself if it fails.
     await transport.configure();
-    // macOS auto-negotiates MTU. If the plugin reports the default payload,
-    // fall back to the stable payload cap (see maxBleMtuSize).
-    if (transport.bleMtuSize < 100) {
-      transport.bleMtuSize = UniversalBleTransportBase.maxBleMtuSize;
-      Log.info(
-        '[BLE] macOS: MTU not negotiated, using mtu=${transport.bleMtuSize}',
-      );
-    }
     return transport;
-  }
-
-  @override
-  Future<void> openExtra() async {
-    // After all subscriptions are registered, pause before sending any RPC data.
-    // This gives the Flipper firmware time to send an L2CAP Connection Parameter
-    // Update Request; macOS accepts it and negotiates a shorter connection interval
-    // (typically 15–30 ms vs the 100 ms macOS default).  btleplug uses the same
-    // 300 ms settle for exactly this reason.  The pause is harmless — it is well
-    // below the BLE supervision timeout and no GATT operations are in flight.
-    await Future.delayed(const Duration(milliseconds: 300));
-    Log.info('[BLE] macOS: connection parameter settle complete');
   }
 }

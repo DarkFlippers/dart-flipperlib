@@ -46,6 +46,11 @@ class IosBleTransport extends UniversalBleTransportBase {
   IosBleTransport._(BleDiscoveredDevice device)
     : super(device, UniversalBleOps());
 
+  // Same CoreBluetooth as macOS, and the same L2CAP request from the firmware;
+  // iOS had never waited for it.
+  @override
+  Duration get connectSettle => const Duration(milliseconds: 300);
+
   static Future<IosBleTransport> create(BleDiscoveredDevice device) async {
     final transport = IosBleTransport._(device);
     await transport.configure();

@@ -11,8 +11,17 @@ abstract class BleOps {
     void Function(String deviceId, bool isConnected, String? error)? cb,
   );
 
+  /// The fourth argument is universal_ble's `timestamp`, not an MTU: its
+  /// Darwin plugin fills it with `Date().timeIntervalSince1970 * 1000`. It is
+  /// carried through unused - named here only so the next person looking for a
+  /// settled-MTU signal does not think they have found one.
   set onValueChange(
-    void Function(String deviceId, String charId, Uint8List value, int? mtu)?
+    void Function(
+      String deviceId,
+      String charId,
+      Uint8List value,
+      int? timestamp,
+    )?
     cb,
   );
 
