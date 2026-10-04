@@ -28,6 +28,9 @@ abstract class UniversalBleTransportBase extends Transport {
   // The largest ATT_MTU the spec allows. Asking for it concedes nothing: the
   // peer answers with what it will carry, and the clamp above bounds that.
   static const int _requestedMtu = 517;
+  // Below this a link is working but slow enough to be worth saying out loud -
+  // a quarter of the cap costs four times the writes for the same bytes.
+  static const int _slowMtuSize = 100;
   // Bound for the unencrypted GATT setup steps (MTU negotiation, service
   // discovery).
   static const Duration _gattOpTimeout = Duration(seconds: 15);
@@ -290,6 +293,23 @@ abstract class UniversalBleTransportBase extends Transport {
       Log.warn('[BLE] MTU read failed: $e (keeping $_negotiatedMtu)');
     }
     bleMtuSize = (_negotiatedMtu - 3).clamp(_minBleMtuSize, maxBleMtuSize);
+    if (bleMtuSize < _slowMtuSize) {
+      // Warned rather than noted, because this is the difference between a
+      // transfer that takes a minute and one the user reports as frozen, and
+      // nothing else will say so afterwards: the host keeps warnings and errors
+      // for a bug report and drops everything below them. A small MTU is not an
+      // error - the link works - but it is the answer to "why was it slow", and
+      // it is not recoverable from anything else in the log.
+      // payload, not mtu: both figures here are ATT_MTU minus the 3-byte
+      // header, and an ATT_MTU of 20 does not exist. Says that it is slow and
+      // not how slow - throughput here is bounded by the connection interval as
+      // much as by the payload, and a modelled multiplier in a log users paste
+      // into public issues would read as a measurement.
+      Log.warn(
+        '[BLE] link carries only payload=$bleMtuSize of $maxBleMtuSize; '
+        'transfers will be slow',
+      );
+    }
   }
 
   Future<void> configureConnected(String deviceId) async {
