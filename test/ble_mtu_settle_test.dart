@@ -74,6 +74,10 @@ UniversalBleTransportBase _transport(_FakeOps ops) => _TestTransport(
   ops,
 );
 
+const _cap = UniversalBleTransportBase.maxBleMtuSize;
+// The clamp floor: what an unnegotiated 23-byte ATT_MTU leaves.
+const _minPayload = 20;
+
 void main() {
   final logged = <String>[];
 
@@ -111,7 +115,7 @@ void main() {
 
     await transport.configureConnected('dev');
 
-    expect(transport.bleMtuSize, UniversalBleTransportBase.maxBleMtuSize);
+    expect(transport.bleMtuSize, _cap);
     expect(ops.calls, 1, reason: 'a saturated reading must not be re-read');
   });
 
@@ -125,6 +129,45 @@ void main() {
     expect(logged, contains(contains('MTU read failed')));
   });
 
+  test('a link that stays small says so where a report will carry it', () async {
+    // The host keeps warnings and errors for a bug report and drops the rest,
+    // so this is the only level at which "the link is slow" survives to be read
+    // back. Both reads answer small: the link really is at 23.
+    final ops = _FakeOps(mtus: [23, 23]);
+    final transport = _transport(ops);
+
+    await transport.configureConnected('dev');
+
+    expect(transport.bleMtuSize, _minPayload);
+    expect(
+      logged,
+      contains(contains('link carries only payload=$_minPayload of $_cap')),
+    );
+  });
+
+  test('the threshold is where it says it is', () async {
+    // Without a pair either side of it, any value from 21 to 181 keeps the two
+    // cases above green and the constant means nothing.
+    Future<bool> warnsAtPayload(int payload) async {
+      logged.clear();
+      await _transport(_FakeOps(mtus: [23, payload + 3]))
+          .configureConnected('dev');
+      return logged.any((line) => line.contains('link carries only'));
+    }
+
+    expect(await warnsAtPayload(99), isTrue);
+    expect(await warnsAtPayload(100), isFalse);
+  });
+
+  test('a healthy link says nothing about being slow', () async {
+    final ops = _FakeOps(mtus: [23, 185]);
+    final transport = _transport(ops);
+
+    await transport.configureConnected('dev');
+
+    expect(logged, isNot(contains(contains('link carries only'))));
+  });
+
   test('the payload never exceeds the firmware ATT ceiling', () async {
     // A platform reporting more than the firmware can take must still be cut
     // to the cap: a larger write becomes a long write, which it handles worse.
@@ -133,6 +176,6 @@ void main() {
 
     await transport.configureConnected('dev');
 
-    expect(transport.bleMtuSize, UniversalBleTransportBase.maxBleMtuSize);
+    expect(transport.bleMtuSize, _cap);
   });
 }
