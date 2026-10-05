@@ -51,6 +51,11 @@ class IosBleTransport extends UniversalBleTransportBase {
   @override
   Duration get connectSettle => const Duration(milliseconds: 300);
 
+  // CoreBluetooth negotiates the MTU itself and reports whatever it has so far,
+  // so the figure taken right after connect can predate the exchange.
+  @override
+  bool get mtuSettlesAfterDiscovery => true;
+
   static Future<IosBleTransport> create(BleDiscoveredDevice device) async {
     final transport = IosBleTransport._(device);
     await transport.configure();

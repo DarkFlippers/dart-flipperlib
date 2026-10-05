@@ -40,8 +40,13 @@ class _FakeOps implements BleOps {
   final int? throwFromCall;
   int calls = 0;
 
+  /// Every value the transport asked for, so the request itself can be pinned
+  /// rather than only its answer.
+  final List<int> requested = [];
+
   @override
   Future<int> requestMtu(String deviceId, int mtu) async {
+    requested.add(mtu);
     calls++;
     if (throwFromCall != null && calls >= throwFromCall!) {
       throw StateError('platform refused');
@@ -65,8 +70,18 @@ class _FakeOps implements BleOps {
   );
 }
 
+/// Stands in for a CoreBluetooth platform: the one that negotiates the MTU on
+/// the link's behalf and so wants reading again after discovery.
 class _TestTransport extends UniversalBleTransportBase {
   _TestTransport(super.device, super.ops);
+
+  @override
+  bool get mtuSettlesAfterDiscovery => true;
+}
+
+/// Stands in for the platforms that get their figure from the first ask.
+class _NoResettleTransport extends UniversalBleTransportBase {
+  _NoResettleTransport(super.device, super.ops);
 }
 
 UniversalBleTransportBase _transport(_FakeOps ops) => _TestTransport(
@@ -82,8 +97,9 @@ void main() {
   final logged = <String>[];
 
   setUp(() {
+    UniversalBleTransportBase.resetSlowLinkLatch();
     logged.clear();
-    Log.sink = (level, message) => logged.add(message);
+    Log.sink = (level, message) => logged.add('${level.name}: $message');
     Log.level = FlipperLogLevel.trace;
   });
 
@@ -139,10 +155,62 @@ void main() {
     await transport.configureConnected('dev');
 
     expect(transport.bleMtuSize, _minPayload);
+    // At warning, not info. A consumer keeps warnings for a bug report and
+    // drops what is below them, so a demotion would delete the line from the
+    // one place it exists to appear - while leaving every other assertion here
+    // green.
     expect(
       logged,
-      contains(contains('link carries only payload=$_minPayload of $_cap')),
+      contains(
+        contains('warning: [BLE] link carries only payload=$_minPayload'),
+      ),
     );
+  });
+
+  // The rule the pairing reconnect rests on: that path measures a *different*
+  // link, and keeping a larger earlier figure would put every write above the
+  // new link's ATT MTU, where it is silently promoted to a long write. Every
+  // other case here feeds non-decreasing readings, so "takes the newer" and
+  // "takes the larger" are indistinguishable across all of them - and the
+  // larger-wins version passed the whole file.
+  test('a later, smaller reading replaces a larger one', () async {
+    final ops = _FakeOps(mtus: [185, 23]);
+    final transport = _transport(ops);
+
+    await transport.configureConnected('dev');
+
+    expect(
+      transport.bleMtuSize,
+      _minPayload,
+      reason: 'the reading taken after discovery is the one that counts',
+    );
+  });
+
+  // Android and the rest take what the first ask granted. Reading again there
+  // is not free: its stack ignores a repeat request while universal_ble parks
+  // the callback, so the ask can hold the package's global queue.
+  test('a platform that settles on the first ask is not asked twice', () async {
+    final ops = _FakeOps(mtus: [185, 414]);
+    final transport = _NoResettleTransport(
+      BleDiscoveredDevice(uble.BleDevice(deviceId: 'dev', name: 'Flipper')),
+      ops,
+    );
+
+    await transport.configureConnected('dev');
+
+    expect(ops.calls, 1);
+    expect(transport.bleMtuSize, 182, reason: 'the first reading stands');
+  });
+
+  test('asks for the largest MTU the platform will take', () async {
+    final ops = _FakeOps(mtus: [23, 185]);
+
+    await _transport(ops).configureConnected('dev');
+
+    // Android grants what it is asked for, up to the firmware ceiling, so this
+    // number is the one that decides the payload on the platform the
+    // saturation guard assumes will saturate.
+    expect(ops.requested, everyElement(517));
   });
 
   test('the threshold is where it says it is', () async {
