@@ -45,7 +45,8 @@ class MacosBlePlatform extends UniversalBlePlatformBase {
 class MacosBleTransport extends UniversalBleTransportBase {
   // Route the whole connection through universal_ble (one CBCentralManager for
   // the entire process). Scanning, availability and getSystemDevices already go
-  // through universal_ble; the native FlipperBlePlugin only ever supplied this
+  // through universal_ble; the native macOS BLE plugin this transport used to use (since removed)
+  // only ever supplied this
   // transport's GATT ops, which meant two CBCentralManager instances coexisted.
   // Apple discourages that — the two managers fight over connection-event
   // scheduling and the link drops with spurious supervision timeouts
@@ -56,6 +57,11 @@ class MacosBleTransport extends UniversalBleTransportBase {
 
   @override
   Duration get connectSettle => const Duration(milliseconds: 300);
+
+  // CoreBluetooth negotiates the MTU itself and reports whatever it has so far,
+  // so the figure taken right after connect can predate the exchange.
+  @override
+  bool get mtuSettlesAfterDiscovery => true;
 
   static Future<MacosBleTransport> create(BleDiscoveredDevice device) async {
     final transport = MacosBleTransport._(device);
