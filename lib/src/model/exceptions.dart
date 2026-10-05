@@ -13,13 +13,38 @@ class FlipperCliBusyError extends StateError {
 /// Thrown by storageWriteChunked when the caller cancels the upload. The
 /// firmware's write stream has been closed cleanly with an empty final frame
 /// and the partial file deleted (best effort).
-class FlipperWriteCancelledException implements Exception {
-  final String path;
-
-  FlipperWriteCancelledException(this.path);
+class FlipperWriteCancelledException extends FlipperCancelledException {
+  FlipperWriteCancelledException(super.path);
 
   @override
   String toString() => 'Write cancelled: $path';
+}
+
+/// A chunked transfer the caller asked to stop.
+///
+/// A base over the two so a caller driving both from one flag can catch them
+/// together: the companion app's MIFARE recovery does exactly that, and two
+/// clauses that have to stay in sync is how one of them gets forgotten. Two
+/// cases and a shared field, not a sealed failure hierarchy - ADR 0008 rejects
+/// those and this is not one.
+abstract class FlipperCancelledException implements Exception {
+  final String path;
+
+  FlipperCancelledException(this.path);
+}
+
+/// Thrown by storageReadChunked when the caller cancels the download.
+///
+/// Unlike the write, nothing is left half-done on the device - a read changes
+/// nothing there. What it does leave is the rest of the response in flight: the
+/// firmware cannot be told to stop sending, so the request stays registered and
+/// its frames keep arriving until the file ends. The caller is freed at the
+/// frame where it asked, which is the point.
+class FlipperReadCancelledException extends FlipperCancelledException {
+  FlipperReadCancelledException(super.path);
+
+  @override
+  String toString() => 'Read cancelled: $path';
 }
 
 class FlipperRpcException implements Exception {

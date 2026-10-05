@@ -49,23 +49,69 @@ extension FlipperStorageApi on FlipperClient {
   /// Flipper and pulling it takes as long as it takes. Nothing on screen is
   /// blocked on an individual frame, and jumping the queue ahead of the
   /// readings the UI does need buys nothing.
+  /// [isCancelled] is asked once per received frame. When it answers true this
+  /// throws [FlipperReadCancelledException] at that frame instead of at the end
+  /// of the file, and the bytes gathered so far are released.
+  ///
+  /// It frees the caller; it does not stop the transfer. The firmware streams a
+  /// read to the end once asked and the protocol has no abort for it, so the
+  /// request stays in flight and its frames go on arriving - counted, no longer
+  /// kept. That is deliberate rather than merely tolerated: the call staying
+  /// registered is what keeps the session's own bookkeeping honest, so
+  /// [FlipperClient.storageBusy] still reports the link as busy and everything
+  /// that defers to a busy link keeps deferring instead of piling onto a link
+  /// that is still saturated. Reads are pipelined, so a following request is
+  /// sent straight away and shares what bandwidth is left - it is not blocked,
+  /// it is slower.
+  ///
+  /// The limit worth knowing: the question is only asked when a frame arrives.
+  /// A transfer that has stalled consults nothing, so the caller waits out
+  /// [timeout] as it would have anyway. This cancels a read that is moving.
   Future<List<int>> storageReadChunked(
     String path, {
     int expectedSize = 0,
     void Function(double progress)? onProgress,
     Duration timeout = const Duration(minutes: 5),
     FlipperRequestPriority priority = FlipperRequestPriority.background,
+    bool Function()? isCancelled,
   }) async {
     // Data is collected per frame into a byte builder and the frames are not
     // retained: holding every protobuf frame plus a growable List<int> copy
     // multiplied a large file's footprint by an order of magnitude.
     final bytes = BytesBuilder(copy: true);
-    await callRpcFrames(
+    // Completed from inside onFrame, which is the only per-frame hook there is:
+    // a throw from there is caught and logged by PendingRpc and would never
+    // reach this caller.
+    final cancelled = Completer<Never>();
+    var abandoned = false;
+    var framesSeen = 0;
+
+    final read = callRpcFrames(
       Main(storageReadRequest: ReadRequest(path: path)),
       timeout: timeout,
       priority: priority,
       retainFrames: false,
       onFrame: (frame) {
+        framesSeen++;
+        // Latched: every later frame of the drain would otherwise ask the
+        // predicate again, get the same answer, and complete an already
+        // completed Completer - which throws, inside a callback PendingRpc
+        // catches and logs, so it would surface as a mystery rather than as
+        // this.
+        if (abandoned) return;
+        if (isCancelled?.call() ?? false) {
+          abandoned = true;
+          // Released now, not at the end of the drain: a read nobody is waiting
+          // for must not go on holding a partial file - which for a nonce log
+          // is megabytes.
+          bytes.clear();
+          Log.info(
+            '[Storage] read "$path" cancelled after $framesSeen frames; '
+            'the rest of the response is still draining',
+          );
+          cancelled.completeError(FlipperReadCancelledException(path));
+          return;
+        }
         if (!frame.hasStorageReadResponse()) return;
         final resp = frame.storageReadResponse;
         if (!resp.hasFile()) return;
@@ -75,6 +121,11 @@ extension FlipperStorageApi on FlipperClient {
         }
       },
     );
+
+    // Future.any attaches an error handler to both, so whichever loses - the
+    // abandoned read failing on a link drop mid-drain, most likely - is handled
+    // rather than reaching the zone as [uncaught].
+    await Future.any([read, cancelled.future]);
     onProgress?.call(1.0);
     return bytes.takeBytes();
   }
