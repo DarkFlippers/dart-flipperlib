@@ -143,11 +143,43 @@ abstract class SerialUsbTransportBase extends Transport {
   @override
   void onFaultExtra(Object error) {
     _failInFlight(error);
+    // Releases the port, which nothing else will. onTransportFault has already
+    // set the lifecycle to closed, and close() returns early unless it is
+    // active - so after a fault doClose() is unreachable, and doClose() is the
+    // only thing that sends DesktopUsbShutdown, which is the only thing that
+    // makes the isolate call port.close()/dispose(). Without this a faulted USB
+    // link left the COM handle open for the life of the process, the isolate
+    // still spinning its read loop, and auto-reconnect opening a second port on
+    // the same COM 600 ms later - against a port its own orphan still held.
+    //
+    // The BLE subclass has always done its equivalent here (_markBleDisconnected
+    // and _clearBleCallbacks); USB simply never got one.
+    //
+    // Fire-and-forget with its own catch, because onFaultExtra is void and must
+    // not throw. Not a bare unawaited: the app's guarded() lives above this
+    // submodule, so the attribution a failure needs is spelled out here instead
+    // of arriving in the log as [uncaught] with nothing naming the operation.
+    unawaited(
+      _release().catchError((Object error) {
+        Log.error(
+          '[Transport] releasing the USB port after a fault '
+          'failed: $error',
+        );
+      }),
+    );
     if (!_exited.isCompleted) _exited.complete();
   }
 
   @override
-  Future<void> doClose() async {
+  Future<void> doClose() => _release();
+
+  // Idempotent: reached from doClose on an orderly close and from onFaultExtra
+  // on a fault, and after a fault both can run.
+  bool _released = false;
+
+  Future<void> _release() async {
+    if (_released) return;
+    _released = true;
     // SendPort.send to a dead isolate is a silent no-op, so no guard needed.
     _commandPort.send(const DesktopUsbShutdown());
     await _exited.future.timeout(const Duration(seconds: 2), onTimeout: () {});

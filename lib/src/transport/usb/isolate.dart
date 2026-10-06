@@ -49,14 +49,44 @@ class DesktopUsbExited {
   const DesktopUsbExited();
 }
 
+// What the OS said about a failed open, code included.
+//
+// The message alone is not diagnostic and has sent us down the wrong path
+// before. libserialport reads `lastError` as a live GetLastError() after the
+// fact, and every failure path in sp_open that gets past CreateFile calls
+// sp_close() first - which succeeds and clobbers it. So a port genuinely held
+// by someone reports "Access is denied." (5), while a configuration IOCTL
+// failing on a half-ready device reports *success* (0). Without the number
+// those are indistinguishable, and so are "held by another process", "device
+// unplugged" and "device still enumerating":
+//
+//   5 - held by someone, us included
+//   2 - the device is gone
+//   0 - the open got past CreateFile; a config call failed. Not ready.
+String _lastOpenError() {
+  final error = SerialPort.lastError;
+  if (error == null) return '';
+  // Not `message.isEmpty`: on Windows FormatMessageA(0) returns a non-empty
+  // "The operation completed successfully.", which is why the code matters.
+  return ': ${error.message} (code ${error.errorCode})';
+}
+
 void desktopUsbIsolateEntry(DesktopUsbIsolateConfig config) {
   final commandPort = ReceivePort();
   final SerialPort port;
+  // Mirrors `port` for the catch below, which cannot read a final that the
+  // constructor itself might have thrown before assigning.
+  SerialPort? constructed;
   try {
     port = SerialPort(config.portName);
+    constructed = port;
     if (!port.openReadWrite()) {
-      final error = SerialPort.lastError?.message;
-      final details = error == null ? '' : ': $error';
+      final details = _lastOpenError();
+      // Nothing to close - libserialport's own sp_open already ran sp_close on
+      // every path that returns false - but the sp_port struct is ours.
+      try {
+        port.dispose();
+      } catch (_) {}
       config.eventPort.send(
         DesktopUsbFault('Failed to open ${config.portName}$details'),
       );
@@ -78,8 +108,19 @@ void desktopUsbIsolateEntry(DesktopUsbIsolateConfig config) {
     cfg.rts = SerialPortRts.on;
     port.config = cfg;
   } catch (e) {
-    final error = SerialPort.lastError?.message;
-    final details = error == null ? '$e' : '$e ($error)';
+    final details = '$e${_lastOpenError()}';
+    // The handle is open by this point: openReadWrite() succeeded and the throw
+    // came from configuring the port (`port.config = cfg` goes through
+    // Util.call, which throws). Returning without closing left the OS handle
+    // held with nothing referencing it - so the next open of the same COM port
+    // was refused by our own orphan. Best-effort, and legitimately so: nothing
+    // is waiting on it and the isolate is about to end either way.
+    try {
+      constructed?.close();
+    } catch (_) {}
+    try {
+      constructed?.dispose();
+    } catch (_) {}
     config.eventPort.send(DesktopUsbFault('Open error: $details'));
     config.eventPort.send(const DesktopUsbExited());
     commandPort.close();
