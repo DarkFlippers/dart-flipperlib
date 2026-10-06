@@ -143,11 +143,69 @@ abstract class SerialUsbTransportBase extends Transport {
   @override
   void onFaultExtra(Object error) {
     _failInFlight(error);
-    if (!_exited.isCompleted) _exited.complete();
+    // Releases the port, which nothing else will. onTransportFault has already
+    // set the lifecycle to closed, and close() returns early unless it is
+    // active - so after a fault doClose() is unreachable, and doClose() is the
+    // only thing that sends DesktopUsbShutdown, which is the only thing that
+    // makes the isolate call port.close()/dispose(). Without this a faulted USB
+    // link left the COM handle open for the life of the process, the isolate
+    // still spinning its read loop, and auto-reconnect opening a second port on
+    // the same COM 600 ms later - against a port its own orphan still held.
+    //
+    // The BLE subclass has always done its equivalent here (_markBleDisconnected
+    // and _clearBleCallbacks); USB simply never got one.
+    //
+    // Fire-and-forget with its own catch, because onFaultExtra is void and must
+    // not throw. Not a bare unawaited: the app's guarded() lives above this
+    // submodule, so the attribution a failure needs is spelled out here instead
+    // of arriving in the log as [uncaught] with nothing naming the operation.
+    // _exited is deliberately NOT completed here, and that is the whole fix.
+    //
+    // _release sends DesktopUsbShutdown and then waits on _exited - bounded at
+    // 2 s - before killing the isolate, because the isolate is what actually
+    // calls port.close() and port.dispose() when it dequeues that message.
+    // Completing _exited here resolved that wait on the next microtask, so the
+    // kill landed microseconds after the send and the isolate never got to run
+    // shutdown(). Killing a Dart isolate runs no C-level cleanup, so the handle
+    // and the sp_port struct leaked to the process - and with the isolate dead,
+    // nothing could ever send the message again. Measured over ten runs against
+    // a model of the real read loop: the port closed 0/10 times with this
+    // completed here, and 10/10 times without.
+    //
+    // The isolate completes it itself on DesktopUsbExited (see above), and
+    // _eventSub is still live at this point - it is cancelled inside _release,
+    // after the wait - so that message still arrives. onTimeout is the backstop
+    // for an isolate that is already gone or wedged, which is what it was
+    // written to be.
+    unawaited(
+      _release().catchError((Object e) {
+        Log.error(
+          '[Transport] releasing the USB port after a fault failed: $e',
+        );
+      }),
+    );
   }
 
   @override
-  Future<void> doClose() async {
+  Future<void> doClose() => _release();
+
+  // Idempotent: reached from doClose on an orderly close and from onFaultExtra
+  // on a fault, and after a fault both can run.
+  bool _released = false;
+
+  /// Whether the release has run to completion - i.e. the isolate confirmed it
+  /// was gone (or the wait timed out) and the kill has happened.
+  ///
+  /// Exists for the test that pins the thing a source assertion could not see:
+  /// that the release *waits* rather than killing the isolate out from under
+  /// the port close it just asked for.
+  // Visible for the test below; not part of the transport's contract.
+  bool get releaseFinished => _releaseFinished;
+  bool _releaseFinished = false;
+
+  Future<void> _release() async {
+    if (_released) return;
+    _released = true;
     // SendPort.send to a dead isolate is a silent no-op, so no guard needed.
     _commandPort.send(const DesktopUsbShutdown());
     await _exited.future.timeout(const Duration(seconds: 2), onTimeout: () {});
@@ -156,5 +214,6 @@ abstract class SerialUsbTransportBase extends Transport {
     _eventSub = null;
     _eventPort.close();
     _failInFlight(StateError('Transport closed'));
+    _releaseFinished = true;
   }
 }

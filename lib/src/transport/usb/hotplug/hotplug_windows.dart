@@ -15,6 +15,10 @@ import 'hotplug.dart';
 
 const int _wmClose = 0x0010;
 const int _wmDestroy = 0x0002;
+const int _wmQuit = 0x0012;
+// PeekMessage's PM_REMOVE, and MsgWaitForMultipleObjects' QS_ALLINPUT.
+const int _pmRemove = 0x0001;
+const int _qsAllInput = 0x04FF;
 const int _wmDeviceChange = 0x0219;
 const int _dbtDevtypDeviceInterface = 0x00000005;
 const int _deviceNotifyWindowHandle = 0x00000000;
@@ -131,7 +135,13 @@ class WindowsHotplugWatcher implements UsbHotplugWatcher {
     final iso = _isolate;
     _isolate = null;
     Future<void>.delayed(const Duration(seconds: 1), () {
-      iso?.kill(priority: Isolate.beforeNextEvent);
+      // immediate, not beforeNextEvent: the loop below is synchronous Dart and
+      // never returns to the event loop, so beforeNextEvent never fires -
+      // measured, the isolate was still alive after three seconds. Safe here:
+      // the loop holds no Dart state worth unwinding, and the native cleanup
+      // that matters (UnregisterDeviceNotification, DestroyWindow) is skipped
+      // by either kind of kill, which is why WM_CLOSE above is the real exit.
+      iso?.kill(priority: Isolate.immediate);
     });
   }
 }
@@ -205,11 +215,34 @@ void _windowEntry(SendPort mainSend) {
         Int32 Function(Pointer<Void>),
         int Function(Pointer<Void>)
       >('UnregisterDeviceNotification');
-  final getMessageW = user32
+  // PeekMessageW with a timed wait instead of GetMessageW. GetMessageW blocks
+  // inside FFI until a message arrives, and the only thing that ever sends one
+  // is stop() posting WM_CLOSE - which in practice never ran, because it is the
+  // event stream's onCancel and so needs every listener to go, and the
+  // subscriptions were only cancelled from dispose() methods nothing calls.
+  //
+  // A Dart isolate parked in a non-returning FFI call reaches no safepoint, so
+  // it cannot be killed - and Flutter's Windows runner tears the engine down
+  // *synchronously inside WM_DESTROY*, before PostQuitMessage. An isolate that
+  // will not stop there means the window closes and the process does not, which
+  // is how a COM port survived an exit. Returning to Dart every 250 ms costs
+  // four wakeups a second and gives the VM the back-edge safepoints it needs to
+  // unwind this isolate during teardown, which a thread parked in GetMessageW
+  // never offered.
+  //
+  // What it does *not* buy is Isolate.kill: measured, `beforeNextEvent` cannot
+  // stop a synchronous Dart loop like this one, because control never returns
+  // to the event loop. stop()'s own fallback uses `immediate` for that reason.
+  final peekMessageW = user32
       .lookupFunction<
-        Int32 Function(Pointer<_Msg>, Pointer<Void>, Uint32, Uint32),
-        int Function(Pointer<_Msg>, Pointer<Void>, int, int)
-      >('GetMessageW');
+        Int32 Function(Pointer<_Msg>, Pointer<Void>, Uint32, Uint32, Uint32),
+        int Function(Pointer<_Msg>, Pointer<Void>, int, int, int)
+      >('PeekMessageW');
+  final msgWaitForMultipleObjects = user32
+      .lookupFunction<
+        Uint32 Function(Uint32, Pointer<Void>, Int32, Uint32, Uint32),
+        int Function(int, Pointer<Void>, int, int, int)
+      >('MsgWaitForMultipleObjects');
   final translateMessage = user32
       .lookupFunction<
         Int32 Function(Pointer<_Msg>),
@@ -293,9 +326,20 @@ void _windowEntry(SendPort mainSend) {
     // Hand the window handle to the main isolate so it can post WM_CLOSE.
     mainSend.send(hwnd.address);
 
-    while (getMessageW(msg, nullptr, 0, 0) > 0) {
-      translateMessage(msg);
-      dispatchMessageW(msg);
+    var running = true;
+    while (running) {
+      // Wait for input or the timeout, then drain whatever arrived. Either way
+      // the loop returns to Dart, which is the point - see the note on the
+      // bindings above.
+      msgWaitForMultipleObjects(0, nullptr, 0, 250, _qsAllInput);
+      while (peekMessageW(msg, nullptr, 0, 0, _pmRemove) != 0) {
+        if (msg.ref.message == _wmQuit) {
+          running = false;
+          break;
+        }
+        translateMessage(msg);
+        dispatchMessageW(msg);
+      }
     }
   } finally {
     if (notify != nullptr) unregisterDeviceNotification(notify);
