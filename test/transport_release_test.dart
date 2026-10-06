@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flipperlib/src/model/enums.dart';
@@ -17,7 +16,11 @@ import 'package:flutter_test/flutter_test.dart';
 ///
 /// These pin the base class's half of the contract, so the asymmetry is written
 /// down rather than rediscovered. The BLE subclass has always compensated in
-/// `onFaultExtra`; the USB one now does too.
+/// `onFaultExtra`; the USB one now does too - and that the USB one really does
+/// is pinned behaviourally in `usb_release_test.dart`, against the real class.
+/// A source assertion was tried here first and was worse than nothing: it
+/// searched `onFaultExtra` for the text `_release()`, and the span included a
+/// comment saying `_release()`, so deleting the call passed.
 class _FakeTransport extends Transport {
   _FakeTransport({this.releaseOnFault = true});
 
@@ -59,44 +62,7 @@ class _FakeTransport extends Transport {
   Future<void> nudgeCli() async {}
 }
 
-/// The real USB subclass cannot be instantiated here - its constructor spawns
-/// an isolate and opens a serial port - so the tests above pin the base class's
-/// contract with a fake and this one pins that USB actually honours it.
-///
-/// A source assertion rather than a behavioural one, deliberately, and in the
-/// same spirit as this repo's other ratchets: removing the release call from the
-/// real `onFaultExtra` passes every behavioural test in this file, because they
-/// exercise the fake. Crude, and better than the alternative, which is nothing.
-void _usbHonoursTheContract() {
-  group('the USB transport', () {
-    test('releases the port from its fault path, not only from doClose', () {
-      final source = File('lib/src/transport/usb/link.dart').readAsStringSync();
-
-      final faultBody = source.substring(
-        source.indexOf('void onFaultExtra('),
-        source.indexOf('Future<void> doClose()'),
-      );
-
-      expect(
-        faultBody,
-        contains('_release()'),
-        reason:
-            'after a fault doClose() is unreachable, so this is the only '
-            'place the COM handle goes back',
-      );
-      expect(
-        source,
-        contains('if (_released) return;'),
-        reason:
-            'and it has to be idempotent: a fault and a close can both '
-            'reach it',
-      );
-    });
-  });
-}
-
 void main() {
-  _usbHonoursTheContract();
   group('a transport that faults', () {
     test('never reaches doClose, so close() cannot free anything', () async {
       // The bug, reproduced: a subclass that frees only in doClose().

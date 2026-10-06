@@ -135,7 +135,13 @@ class WindowsHotplugWatcher implements UsbHotplugWatcher {
     final iso = _isolate;
     _isolate = null;
     Future<void>.delayed(const Duration(seconds: 1), () {
-      iso?.kill(priority: Isolate.beforeNextEvent);
+      // immediate, not beforeNextEvent: the loop below is synchronous Dart and
+      // never returns to the event loop, so beforeNextEvent never fires -
+      // measured, the isolate was still alive after three seconds. Safe here:
+      // the loop holds no Dart state worth unwinding, and the native cleanup
+      // that matters (UnregisterDeviceNotification, DestroyWindow) is skipped
+      // by either kind of kill, which is why WM_CLOSE above is the real exit.
+      iso?.kill(priority: Isolate.immediate);
     });
   }
 }
@@ -220,7 +226,13 @@ void _windowEntry(SendPort mainSend) {
   // *synchronously inside WM_DESTROY*, before PostQuitMessage. An isolate that
   // will not stop there means the window closes and the process does not, which
   // is how a COM port survived an exit. Returning to Dart every 250 ms costs
-  // four wakeups a second and makes the isolate killable whatever else happens.
+  // four wakeups a second and gives the VM the back-edge safepoints it needs to
+  // unwind this isolate during teardown, which a thread parked in GetMessageW
+  // never offered.
+  //
+  // What it does *not* buy is Isolate.kill: measured, `beforeNextEvent` cannot
+  // stop a synchronous Dart loop like this one, because control never returns
+  // to the event loop. stop()'s own fallback uses `immediate` for that reason.
   final peekMessageW = user32
       .lookupFunction<
         Int32 Function(Pointer<_Msg>, Pointer<Void>, Uint32, Uint32, Uint32),
