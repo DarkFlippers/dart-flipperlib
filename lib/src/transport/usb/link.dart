@@ -159,6 +159,16 @@ abstract class SerialUsbTransportBase extends Transport {
     // not throw. Not a bare unawaited: the app's guarded() lives above this
     // submodule, so the attribution a failure needs is spelled out here instead
     // of arriving in the log as [uncaught] with nothing naming the operation.
+    // Completed before _release is called. _release waits on this future,
+    // bounded at 2 s, for the isolate to say it has gone - and on a fault no
+    // such word is coming, because the link is already broken.
+    //
+    // Measured: either order costs nothing (0-4 ms), since _release suspends at
+    // that await and whichever statement follows still runs. What costs is not
+    // completing it at all, which is a flat 2 s on every fault. So this is
+    // ordered for legibility rather than to fix a stall - but the completion
+    // itself is load-bearing and must not be dropped.
+    if (!_exited.isCompleted) _exited.complete();
     unawaited(
       _release().catchError((Object error) {
         Log.error(
@@ -167,7 +177,6 @@ abstract class SerialUsbTransportBase extends Transport {
         );
       }),
     );
-    if (!_exited.isCompleted) _exited.complete();
   }
 
   @override
