@@ -10,6 +10,8 @@ import '../../transport/ble/ble.dart';
 import '../../transport/transport.dart';
 import '../client.dart';
 
+const storageReadWindow = 8192;
+
 extension FlipperStorageApi on FlipperClient {
   Future<FlipperRpcBatch<ListResponse>> storageList(
     ListRequest request, {
@@ -43,26 +45,30 @@ extension FlipperStorageApi on FlipperClient {
   /// When [expectedSize] is > 0 (e.g. the size from a prior directory listing),
   /// [onProgress] is called with a 0..1 ratio of bytes received; it always
   /// fires once with 1.0 on completion. Returns the assembled file bytes.
-  /// Reads [path] whole, in frames.
+  ///
+  /// The file is pulled in windows of [storageReadWindow] bytes, each an
+  /// ordinary read request with an offset and a size, one at a time. Nothing
+  /// stays open on the firmware between windows, and any other request simply
+  /// runs in between. Firmware that does not know offsets answers the first
+  /// window with the whole file and without the `ranged` flag; that reply is
+  /// taken as the file.
   ///
   /// Background by default because that is what it is: a file belongs to one
   /// Flipper and pulling it takes as long as it takes. Nothing on screen is
   /// blocked on an individual frame, and jumping the queue ahead of the
   /// readings the UI does need buys nothing.
-  /// [isCancelled] is asked once per received frame. When it answers true this
-  /// throws [FlipperReadCancelledException] at that frame instead of at the end
-  /// of the file, and the bytes gathered so far are released.
   ///
-  /// It frees the caller; it does not stop the transfer. The firmware streams a
-  /// read to the end once asked and the protocol has no abort for it, so the
-  /// request stays in flight and its frames go on arriving - counted, no longer
-  /// kept. That is deliberate rather than merely tolerated: the call staying
-  /// registered is what keeps the session's own bookkeeping honest, so
+  /// [isCancelled] is asked once per received frame. When it answers true this
+  /// throws [FlipperReadCancelledException] at that frame, releases the bytes
+  /// gathered so far and sends no further windows. The window in flight
+  /// finishes on its own - counted, no longer kept - and stays registered
+  /// until then, which is what keeps the session's own bookkeeping honest:
   /// [FlipperClient.storageBusy] still reports the link as busy and everything
-  /// that defers to a busy link keeps deferring instead of piling onto a link
-  /// that is still saturated. Reads are pipelined, so a following request is
-  /// sent straight away and shares what bandwidth is left - it is not blocked,
-  /// it is slower.
+  /// that defers to a busy link keeps deferring. The exception's `drained`
+  /// completes when that window has arrived, and [onProgress] goes on counting
+  /// its frames until then: the bytes are still crossing the link, and a bar
+  /// that froze at the cancel would look like an app that hung - the more so
+  /// on firmware that answers a window with the whole file.
   ///
   /// The limit worth knowing: the question is only asked when a frame arrives.
   /// A transfer that has stalled consults nothing, so the caller waits out
@@ -85,47 +91,76 @@ extension FlipperStorageApi on FlipperClient {
     final cancelled = Completer<Never>();
     var abandoned = false;
     var framesSeen = 0;
+    var total = 0;
+    var ranged = true;
+    Future<int>? inFlight;
 
-    final read = callRpcFrames(
-      Main(storageReadRequest: ReadRequest(path: path)),
-      timeout: timeout,
-      priority: priority,
-      retainFrames: false,
-      onFrame: (frame) {
-        framesSeen++;
-        // Latched: every later frame of the drain would otherwise ask the
-        // predicate again, get the same answer, and complete an already
-        // completed Completer - which throws, inside a callback PendingRpc
-        // catches and logs, so it would surface as a mystery rather than as
-        // this.
-        if (abandoned) return;
-        if (isCancelled?.call() ?? false) {
-          abandoned = true;
-          // Released now, not at the end of the drain: a read nobody is waiting
-          // for must not go on holding a partial file - which for a nonce log
-          // is megabytes.
-          bytes.clear();
-          Log.info(
-            '[Storage] read "$path" cancelled after $framesSeen frames; '
-            'the rest of the response is still draining',
-          );
-          cancelled.completeError(FlipperReadCancelledException(path));
-          return;
-        }
-        if (!frame.hasStorageReadResponse()) return;
-        final resp = frame.storageReadResponse;
-        if (!resp.hasFile()) return;
-        bytes.add(resp.file.data);
-        if (expectedSize > 0) {
-          onProgress?.call((bytes.length / expectedSize).clamp(0.0, 1.0));
-        }
-      },
-    );
+    Future<int> readWindow(int offset) {
+      var received = 0;
+      final request = ReadRequest(
+        path: path,
+        offset: offset,
+        size: storageReadWindow,
+      );
+      return callRpcFrames(
+        Main(storageReadRequest: request),
+        timeout: timeout,
+        priority: priority,
+        retainFrames: false,
+        onFrame: (frame) {
+          framesSeen++;
+          // Latched: every later frame of the drain would otherwise ask the
+          // predicate again, get the same answer, and complete an already
+          // completed Completer - which throws, inside a callback PendingRpc
+          // catches and logs, so it would surface as a mystery rather than as
+          // this.
+          if (!abandoned && (isCancelled?.call() ?? false)) {
+            abandoned = true;
+            // Released now, not at the end of the drain: a read nobody is
+            // waiting for must not go on holding a partial file - which for a
+            // nonce log is megabytes.
+            bytes.clear();
+            Log.info(
+              '[Storage] read "$path" cancelled after $framesSeen frames; '
+              'the window in flight is still draining',
+            );
+            cancelled.completeError(
+              FlipperReadCancelledException(
+                path,
+                drained: inFlight?.then((_) {}, onError: (_) {}),
+              ),
+            );
+          }
+          if (!frame.hasStorageReadResponse()) return;
+          final resp = frame.storageReadResponse;
+          if (!resp.ranged) ranged = false;
+          if (!resp.hasFile()) return;
+          if (offset + received != total) return;
+          received += resp.file.data.length;
+          total += resp.file.data.length;
+          if (!abandoned) bytes.add(resp.file.data);
+          if (expectedSize > 0) {
+            onProgress?.call((total / expectedSize).clamp(0.0, 1.0));
+          }
+        },
+      ).then((_) => received);
+    }
 
-    // Future.any attaches an error handler to both, so whichever loses - the
-    // abandoned read failing on a link drop mid-drain, most likely - is handled
-    // rather than reaching the zone as [uncaught].
-    await Future.any([read, cancelled.future]);
+    try {
+      var offset = 0;
+      while (true) {
+        // Future.any attaches an error handler to both, so whichever loses -
+        // the abandoned window failing on a link drop mid-drain, most likely -
+        // is handled rather than reaching the zone as [uncaught].
+        inFlight = readWindow(offset);
+        final got = await Future.any([inFlight, cancelled.future]);
+        offset += got;
+        if (!ranged || got < storageReadWindow) break;
+      }
+    } catch (_) {
+      abandoned = true;
+      rethrow;
+    }
     onProgress?.call(1.0);
     return bytes.takeBytes();
   }
