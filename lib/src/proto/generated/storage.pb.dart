@@ -596,9 +596,13 @@ class ListResponse extends $pb.GeneratedMessage {
 class ReadRequest extends $pb.GeneratedMessage {
   factory ReadRequest({
     $core.String? path,
+    $core.int? offset,
+    $core.int? size,
   }) {
     final result = create();
     if (path != null) result.path = path;
+    if (offset != null) result.offset = offset;
+    if (size != null) result.size = size;
     return result;
   }
 
@@ -616,6 +620,8 @@ class ReadRequest extends $pb.GeneratedMessage {
       package: const $pb.PackageName(_omitMessageNames ? '' : 'PB_Storage'),
       createEmptyInstance: create)
     ..aOS(1, _omitFieldNames ? '' : 'path')
+    ..aI(2, _omitFieldNames ? '' : 'offset', fieldType: $pb.PbFieldType.OU3)
+    ..aI(3, _omitFieldNames ? '' : 'size', fieldType: $pb.PbFieldType.OU3)
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -645,14 +651,34 @@ class ReadRequest extends $pb.GeneratedMessage {
   $core.bool hasPath() => $_has(0);
   @$pb.TagNumber(1)
   void clearPath() => $_clearField(1);
+
+  @$pb.TagNumber(2)
+  $core.int get offset => $_getIZ(1);
+  @$pb.TagNumber(2)
+  set offset($core.int value) => $_setUnsignedInt32(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasOffset() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearOffset() => $_clearField(2);
+
+  @$pb.TagNumber(3)
+  $core.int get size => $_getIZ(2);
+  @$pb.TagNumber(3)
+  set size($core.int value) => $_setUnsignedInt32(2, value);
+  @$pb.TagNumber(3)
+  $core.bool hasSize() => $_has(2);
+  @$pb.TagNumber(3)
+  void clearSize() => $_clearField(3);
 }
 
 class ReadResponse extends $pb.GeneratedMessage {
   factory ReadResponse({
     File? file,
+    $core.bool? ranged,
   }) {
     final result = create();
     if (file != null) result.file = file;
+    if (ranged != null) result.ranged = ranged;
     return result;
   }
 
@@ -670,6 +696,7 @@ class ReadResponse extends $pb.GeneratedMessage {
       package: const $pb.PackageName(_omitMessageNames ? '' : 'PB_Storage'),
       createEmptyInstance: create)
     ..aOM<File>(1, _omitFieldNames ? '' : 'file', subBuilder: File.create)
+    ..aOB(2, _omitFieldNames ? '' : 'ranged')
     ..hasRequiredFields = false;
 
   @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
@@ -701,6 +728,15 @@ class ReadResponse extends $pb.GeneratedMessage {
   void clearFile() => $_clearField(1);
   @$pb.TagNumber(1)
   File ensureFile() => $_ensure(0);
+
+  @$pb.TagNumber(2)
+  $core.bool get ranged => $_getBF(1);
+  @$pb.TagNumber(2)
+  set ranged($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasRanged() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearRanged() => $_clearField(2);
 }
 
 class WriteRequest extends $pb.GeneratedMessage {

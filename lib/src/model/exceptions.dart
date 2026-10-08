@@ -36,12 +36,18 @@ abstract class FlipperCancelledException implements Exception {
 /// Thrown by storageReadChunked when the caller cancels the download.
 ///
 /// Unlike the write, nothing is left half-done on the device - a read changes
-/// nothing there. What it does leave is the rest of the response in flight: the
-/// firmware cannot be told to stop sending, so the request stays registered and
-/// its frames keep arriving until the file ends. The caller is freed at the
-/// frame where it asked, which is the point.
+/// nothing there. What it does leave is the window in flight: a request once
+/// sent is answered to its end, so it stays registered and its frames keep
+/// arriving. The caller is freed at the frame where it asked, which is the
+/// point; [drained] is for a caller that wants to know when the link is quiet
+/// again.
 class FlipperReadCancelledException extends FlipperCancelledException {
-  FlipperReadCancelledException(super.path);
+  FlipperReadCancelledException(super.path, {Future<void>? drained})
+    : drained = drained ?? Future<void>.value();
+
+  /// Completes once the window that was in flight at the cancel has arrived
+  /// in full, or failed. Never rejects.
+  final Future<void> drained;
 
   @override
   String toString() => 'Read cancelled: $path';

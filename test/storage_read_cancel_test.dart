@@ -1,31 +1,40 @@
+import 'dart:math';
+
 import 'package:flipperlib/flipperlib.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Stopping a read that is already streaming.
-///
-/// The firmware streams a storage read to the end once asked and the protocol
-/// has no abort for it, so cancelling cannot stop the transfer - only free the
-/// caller at the next frame instead of at the end of the file. Everything below
-/// is about that distinction, because getting it wrong in either direction is a
-/// bug: freeing nobody makes Stop useless, and tearing down the request would
-/// leave the session's bookkeeping claiming an idle link while bytes are still
-/// arriving.
+/// Reading a file in windows, and stopping part way.
 ///
 /// `storageReadChunked` is an extension on `FlipperClient`, so a fake cannot
 /// override it - the real body runs and `callRpcFrames` is the seam, which is
-/// the same trick `reboot_refusal_test.dart` uses.
-class _StreamingClient extends FlipperClient {
-  _StreamingClient({required this.frames, this.failAfterCancel = false});
+/// the same trick `reboot_refusal_test.dart` uses. The fake below answers a
+/// read request the way the firmware does: the requested range in 512-byte
+/// frames with `ranged` set, or - as stock firmware, which knows no offsets -
+/// the whole file and no flag.
+class _Flipper extends FlipperClient {
+  _Flipper(
+    this.file, {
+    this.honoursRanges = true,
+    this.failWindowAt,
+    this.failAfterFrame,
+  });
 
-  /// How many response frames the "firmware" sends.
-  final int frames;
+  final List<int> file;
+  final bool honoursRanges;
 
-  /// Whether the request then fails - a link drop part way through a drain
-  /// nobody is waiting for any more.
-  final bool failAfterCancel;
+  /// A window offset whose request fails instead of answering.
+  final int? failWindowAt;
 
+  /// A frame count after which the link drops mid-window.
+  final int? failAfterFrame;
+
+  final requests = <int>[];
   int delivered = 0;
-  bool completed = false;
+  int completed = 0;
+  int inFlight = 0;
+  int maxInFlight = 0;
+  int _nextCommandId = 1;
+  Future<void> _tail = Future<void>.value();
 
   @override
   Future<List<Main>> callRpcFrames(
@@ -37,27 +46,178 @@ class _StreamingClient extends FlipperClient {
     bool retainFrames = true,
     bool interleavable = false,
     bool pipelined = true,
-  }) async {
-    for (var i = 0; i < frames; i++) {
+  }) {
+    inFlight++;
+    maxInFlight = max(maxInFlight, inFlight);
+    final answer = _tail.then((_) => _answer(request, onFrame));
+    _tail = answer.then((_) {}, onError: (Object _) {});
+    return answer.whenComplete(() => inFlight--);
+  }
+
+  Future<List<Main>> _answer(
+    Main request,
+    void Function(Main frame)? onFrame,
+  ) async {
+    final req = request.storageReadRequest;
+    requests.add(req.offset);
+    final commandId = _nextCommandId++;
+    try {
       // An await between frames, because that is how they really arrive: a
       // cancellation decided in one frame has to be seen before the next.
       await Future<void>.delayed(Duration.zero);
-      delivered++;
-      final frame = Main()
-        ..storageReadResponse = (ReadResponse()
-          ..file = (File()..data = List<int>.filled(16, 1)));
-      onFrame?.call(frame);
+      if (failWindowAt == req.offset) {
+        throw FlipperRpcStorageNotExistException(
+          Main()
+            ..commandId = commandId
+            ..commandStatus = CommandStatus.ERROR_STORAGE_NOT_EXIST,
+        );
+      }
+      final start = honoursRanges ? min(req.offset, file.length) : 0;
+      final end = honoursRanges && req.size > 0
+          ? min(start + req.size, file.length)
+          : file.length;
+      var pos = start;
+      do {
+        final chunkEnd = min(pos + 512, end);
+        final frame = Main()
+          ..commandId = commandId
+          ..hasNext = chunkEnd < end
+          ..storageReadResponse = (ReadResponse()
+            ..ranged = honoursRanges
+            ..file = (File()..data = file.sublist(pos, chunkEnd)));
+        delivered++;
+        onFrame?.call(frame);
+        pos = chunkEnd;
+        await Future<void>.delayed(Duration.zero);
+        if (failAfterFrame != null && delivered >= failAfterFrame!) {
+          throw StateError('link dropped mid-window');
+        }
+      } while (pos < end);
+      return const [];
+    } finally {
+      completed++;
     }
-    completed = true;
-    if (failAfterCancel) throw StateError('link dropped mid-drain');
-    return const [];
   }
 }
 
+List<int> _bytes(int length) => List<int>.generate(length, (i) => i & 0xff);
+
+Future<void> _settle() =>
+    Future<void>.delayed(const Duration(milliseconds: 20));
+
 void main() {
+  group('a read nobody cancels', () {
+    test('assembles a file spanning several windows, in order', () async {
+      final file = _bytes(20000);
+      final client = _Flipper(file);
+
+      final bytes = await client.storageReadChunked('/ext/x');
+
+      expect(bytes, file);
+      expect(client.requests, [0, 8192, 16384]);
+    });
+
+    test('handles a file that is an exact number of windows', () async {
+      final file = _bytes(16384);
+      final client = _Flipper(file);
+
+      final bytes = await client.storageReadChunked('/ext/x');
+
+      expect(bytes, file);
+      expect(client.requests, [0, 8192, 16384]);
+    });
+
+    test('keeps one window in flight', () async {
+      final client = _Flipper(_bytes(30000));
+
+      await client.storageReadChunked('/ext/x');
+
+      expect(client.maxInFlight, 1);
+    });
+
+    test('a file smaller than a window takes one request', () async {
+      final file = _bytes(100);
+      final client = _Flipper(file);
+
+      final bytes = await client.storageReadChunked('/ext/x');
+
+      expect(bytes, file);
+      expect(client.requests, [0]);
+    });
+
+    test('an empty file takes one request and returns nothing', () async {
+      final client = _Flipper(const []);
+
+      final bytes = await client.storageReadChunked('/ext/x');
+
+      expect(bytes, isEmpty);
+      expect(client.requests, [0]);
+    });
+
+    test('asks for windows of the documented size', () async {
+      final client = _Flipper(_bytes(100));
+
+      await client.storageReadChunked('/ext/x');
+
+      expect(storageReadWindow, 8192);
+    });
+
+    // Stock firmware ignores the offset and the size and streams the whole
+    // file on the first request. Asking for more would fetch it again.
+    test('takes the whole file from firmware without ranges', () async {
+      final file = _bytes(20000);
+      final client = _Flipper(file, honoursRanges: false);
+
+      final bytes = await client.storageReadChunked('/ext/x');
+
+      expect(bytes, file);
+      expect(client.requests, [0]);
+    });
+
+    test('reports progress against a known size, ending at 1.0', () async {
+      final client = _Flipper(_bytes(20000));
+      final reported = <double>[];
+
+      await client.storageReadChunked(
+        '/ext/x',
+        expectedSize: 20000,
+        onProgress: reported.add,
+      );
+
+      expect(reported.last, 1.0);
+      expect(reported.length, greaterThan(1));
+    });
+
+    test('is unaffected by a predicate that always says no', () async {
+      final file = _bytes(20000);
+      final client = _Flipper(file);
+
+      final bytes = await client.storageReadChunked(
+        '/ext/x',
+        isCancelled: () => false,
+      );
+
+      expect(bytes, file);
+    });
+  });
+
+  group('a read that fails part way', () {
+    test('throws the window\'s error and leaves nothing uncaught', () async {
+      final client = _Flipper(_bytes(30000), failWindowAt: 8192);
+
+      await expectLater(
+        client.storageReadChunked('/ext/x'),
+        throwsA(isA<FlipperRpcStorageNotExistException>()),
+      );
+
+      await _settle();
+      expect(client.completed, client.requests.length);
+    });
+  });
+
   group('a cancelled read', () {
     test('throws, naming the path', () async {
-      final client = _StreamingClient(frames: 10);
+      final client = _Flipper(_bytes(20000));
 
       await expectLater(
         client.storageReadChunked(
@@ -77,7 +237,7 @@ void main() {
     test(
       'is caught by the shared base, as a caller driving both will',
       () async {
-        final client = _StreamingClient(frames: 4);
+        final client = _Flipper(_bytes(20000));
 
         await expectLater(
           client.storageReadChunked('/ext/x', isCancelled: () => true),
@@ -87,10 +247,9 @@ void main() {
     );
 
     // The point of the whole change: the caller is freed at the frame where it
-    // asked, not after the file. Asserted by how much of the "file" had been
-    // delivered when the throw arrived.
-    test('frees the caller mid-stream, not at the end of the file', () async {
-      final client = _StreamingClient(frames: 200);
+    // asked, and no further windows are requested.
+    test('frees the caller mid-stream and requests no more windows', () async {
+      final client = _Flipper(_bytes(200000));
       var seen = 0;
 
       await expectLater(
@@ -98,55 +257,55 @@ void main() {
         throwsA(isA<FlipperReadCancelledException>()),
       );
 
-      expect(
-        client.delivered,
-        lessThan(10),
-        reason: 'it must not have waited out 200 frames',
-      );
-      expect(
-        client.completed,
-        isFalse,
-        reason: 'and the request is still in flight, which is the contract',
-      );
+      expect(client.delivered, lessThan(10));
+      expect(client.requests, [0]);
+
+      await _settle();
+      expect(client.requests, [0], reason: 'no window after the cancel');
+      expect(client.delivered, 16, reason: 'the one in flight drained');
+      expect(client.completed, 1);
     });
 
-    // The request is deliberately left running. Tearing it down is what would
-    // make the session report an idle link while the firmware is still sending,
-    // which is the thing the companion app's battery poll defers to.
-    test('leaves the request in flight, and it finishes on its own', () async {
-      final client = _StreamingClient(frames: 6);
+    test(
+      'on firmware without ranges, the one request drains on its own',
+      () async {
+        final client = _Flipper(_bytes(4096), honoursRanges: false);
+
+        await expectLater(
+          client.storageReadChunked('/ext/x', isCancelled: () => true),
+          throwsA(isA<FlipperReadCancelledException>()),
+        );
+        expect(client.completed, 0);
+
+        await _settle();
+        expect(client.requests, [0]);
+        expect(client.delivered, 8, reason: 'every frame still arrived');
+        expect(client.completed, 1, reason: 'and it unwound normally');
+      },
+    );
+
+    // The window in flight failing after the caller left must be handled
+    // rather than reaching the zone as [uncaught]. Without that this test
+    // fails the suite from the zone.
+    test('the window failing after the cancel does not go uncaught', () async {
+      final client = _Flipper(_bytes(30000), failAfterFrame: 20);
 
       await expectLater(
-        client.storageReadChunked('/ext/x', isCancelled: () => true),
-        throwsA(isA<FlipperReadCancelledException>()),
-      );
-      expect(client.completed, isFalse);
-
-      // Let the abandoned response drain.
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-      expect(client.delivered, 6, reason: 'every frame still arrived');
-      expect(client.completed, isTrue, reason: 'and it unwound normally');
-    });
-
-    // Future.any attaches an error handler to both futures, so the abandoned
-    // read failing later is handled rather than reaching the zone as
-    // [uncaught]. Without that this test fails the suite from the zone.
-    test('an abandoned read that then fails does not go uncaught', () async {
-      final client = _StreamingClient(frames: 5, failAfterCancel: true);
-
-      await expectLater(
-        client.storageReadChunked('/ext/x', isCancelled: () => true),
+        client.storageReadChunked(
+          '/ext/x',
+          isCancelled: () => client.delivered >= 18,
+        ),
         throwsA(isA<FlipperReadCancelledException>()),
       );
 
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-      expect(client.completed, isTrue);
+      await _settle();
+      expect(client.completed, client.requests.length);
     });
 
     // The latch. Without it every frame of the drain asks again and tries to
     // complete a completed Completer.
     test('asks the predicate once, not once per remaining frame', () async {
-      final client = _StreamingClient(frames: 20);
+      final client = _Flipper(_bytes(4096), honoursRanges: false);
       var asked = 0;
 
       await expectLater(
@@ -160,19 +319,19 @@ void main() {
         throwsA(isA<FlipperReadCancelledException>()),
       );
 
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await _settle();
       expect(asked, 1, reason: 'the whole drain must not re-ask');
-      expect(client.completed, isTrue, reason: 'and must not derail the read');
+      expect(client.completed, 1, reason: 'and must not derail the read');
     });
 
-    test('stops reporting progress once it has been abandoned', () async {
-      final client = _StreamingClient(frames: 20);
+    test('goes on reporting progress while the window drains', () async {
+      final client = _Flipper(_bytes(20000));
       final reported = <double>[];
 
       await expectLater(
         client.storageReadChunked(
           '/ext/x',
-          expectedSize: 320,
+          expectedSize: 20000,
           onProgress: reported.add,
           isCancelled: () => client.delivered >= 2,
         ),
@@ -180,54 +339,33 @@ void main() {
       );
       final atCancel = reported.length;
 
-      // Never 1.0. The completion report belongs to a read that finished, and
-      // a cancelled one showing 100% would tell the user their download
-      // completed at the moment they stopped it.
-      expect(reported, isNot(contains(1.0)));
-
-      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await _settle();
+      // The frames of the window in flight are still crossing the link, and a
+      // bar that stopped at the cancel would look like an app that hung.
       expect(
         reported.length,
-        atCancel,
-        reason: 'progress after the caller has its error reads as a bug',
+        greaterThan(atCancel),
+        reason: 'every frame of the drain is still a frame received',
       );
+      expect(reported.last, closeTo(8192 / 20000, 0.001));
+      // Never the completion report: that belongs to a read that finished.
       expect(reported, isNot(contains(1.0)));
     });
-  });
 
-  group('a read nobody cancels', () {
-    test('returns the whole file', () async {
-      final client = _StreamingClient(frames: 4);
+    test('drained completes when the window in flight has', () async {
+      final client = _Flipper(_bytes(200000));
+      late FlipperReadCancelledException cancel;
 
-      final bytes = await client.storageReadChunked('/ext/x');
+      try {
+        await client.storageReadChunked('/ext/x', isCancelled: () => true);
+      } on FlipperReadCancelledException catch (e) {
+        cancel = e;
+      }
+      expect(client.completed, 0);
 
-      expect(bytes, hasLength(64));
-      expect(client.completed, isTrue);
-    });
-
-    test('is unaffected by a predicate that always says no', () async {
-      final client = _StreamingClient(frames: 4);
-
-      final bytes = await client.storageReadChunked(
-        '/ext/x',
-        isCancelled: () => false,
-      );
-
-      expect(bytes, hasLength(64));
-    });
-
-    test('still reports progress against a known size', () async {
-      final client = _StreamingClient(frames: 4);
-      final reported = <double>[];
-
-      await client.storageReadChunked(
-        '/ext/x',
-        expectedSize: 64,
-        onProgress: reported.add,
-      );
-
-      expect(reported.last, 1.0);
-      expect(reported.length, greaterThan(1));
+      await cancel.drained;
+      expect(client.completed, 1);
+      expect(client.delivered, 16);
     });
   });
 }
