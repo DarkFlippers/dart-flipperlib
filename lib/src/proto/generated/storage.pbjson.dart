@@ -171,12 +171,15 @@ const ReadRequest$json = {
   '1': 'ReadRequest',
   '2': [
     {'1': 'path', '3': 1, '4': 1, '5': 9, '10': 'path'},
+    {'1': 'offset', '3': 2, '4': 1, '5': 13, '10': 'offset'},
+    {'1': 'size', '3': 3, '4': 1, '5': 13, '10': 'size'},
   ],
 };
 
 /// Descriptor for `ReadRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List readRequestDescriptor =
-    $convert.base64Decode('CgtSZWFkUmVxdWVzdBISCgRwYXRoGAEgASgJUgRwYXRo');
+final $typed_data.Uint8List readRequestDescriptor = $convert.base64Decode(
+    'CgtSZWFkUmVxdWVzdBISCgRwYXRoGAEgASgJUgRwYXRoEhYKBm9mZnNldBgCIAEoDVIGb2Zmc2'
+    'V0EhIKBHNpemUYAyABKA1SBHNpemU=');
 
 @$core.Deprecated('Use readResponseDescriptor instead')
 const ReadResponse$json = {
@@ -190,12 +193,14 @@ const ReadResponse$json = {
       '6': '.PB_Storage.File',
       '10': 'file'
     },
+    {'1': 'ranged', '3': 2, '4': 1, '5': 8, '10': 'ranged'},
   ],
 };
 
 /// Descriptor for `ReadResponse`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List readResponseDescriptor = $convert.base64Decode(
-    'CgxSZWFkUmVzcG9uc2USJAoEZmlsZRgBIAEoCzIQLlBCX1N0b3JhZ2UuRmlsZVIEZmlsZQ==');
+    'CgxSZWFkUmVzcG9uc2USJAoEZmlsZRgBIAEoCzIQLlBCX1N0b3JhZ2UuRmlsZVIEZmlsZRIWCg'
+    'ZyYW5nZWQYAiABKAhSBnJhbmdlZA==');
 
 @$core.Deprecated('Use writeRequestDescriptor instead')
 const WriteRequest$json = {
