@@ -22,7 +22,13 @@ dependencies:
   fixnum: ^1.1.1
   flutter_libserialport: ^0.6.0
   protobuf: ^6.0.0
-  universal_ble: ^2.1.1
+  # The floor is a crash, not a feature. Through 2.1.1 the Windows
+  # WriteValueAsync completion handler reached GetResults() on a cancelled
+  # operation and let the hresult_error escape onto a WinRT thread-pool
+  # thread, where terminate -> abort took the process with it - so a link
+  # that died under _sendMessage killed the host app outright. 2.2.0 wrapped
+  # that handler and stopped capturing its strings by reference.
+  universal_ble: ^2.3.0
   usb_serial: ^0.5.2
 
 dev_dependencies:
