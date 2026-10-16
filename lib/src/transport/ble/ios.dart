@@ -12,13 +12,7 @@ class IosBlePlatform extends UniversalBlePlatformBase {
   const IosBlePlatform();
 
   @override
-  Future<void> requestPermissions() async {
-    try {
-      await uble.UniversalBle.requestPermissions();
-    } catch (e) {
-      Log.error('[FlipperClient] iOS BLE permission request failed: $e');
-    }
-  }
+  String get platformLabel => 'iOS';
 
   @override
   Future<List<BleDiscoveredDevice>> loadKnownDevices() async {

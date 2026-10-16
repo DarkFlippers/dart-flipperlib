@@ -12,13 +12,7 @@ class MacosBlePlatform extends UniversalBlePlatformBase {
   MacosBlePlatform();
 
   @override
-  Future<void> requestPermissions() async {
-    try {
-      await uble.UniversalBle.requestPermissions();
-    } catch (e) {
-      Log.error('[FlipperClient] macOS BLE permission request failed: $e');
-    }
-  }
+  String get platformLabel => 'macOS';
 
   @override
   Future<List<BleDiscoveredDevice>> loadKnownDevices() async {

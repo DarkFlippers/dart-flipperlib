@@ -518,9 +518,18 @@ class FlipperClient {
 
   // ── Discovery ──────────────────────────────────────────────────────────────
 
-  Future<void> initialize() async {
-    await blePlatform.requestPermissions();
-  }
+  /// Asks for Bluetooth access and answers what the platform granted.
+  ///
+  /// Returns the answer rather than swallowing it: the picker needs to tell a
+  /// denial from an empty room, and those read identically from the device
+  /// list. #351.
+  Future<BleAccess> initialize() => blePlatform.requestPermissions();
+
+  /// Re-reads [initialize]'s answer without raising a prompt.
+  ///
+  /// For the caller that has to notice the user came back from system settings
+  /// having granted it.
+  Future<BleAccess> readBleAccess() => blePlatform.readAccess();
 
   Future<List<FlipperDevice>> refreshDevices({
     Duration bleTimeout = const Duration(seconds: 10),

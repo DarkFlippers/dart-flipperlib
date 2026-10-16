@@ -1,6 +1,3 @@
-import 'package:universal_ble/universal_ble.dart' as uble;
-
-import '../../common/log.dart';
 import '../../model/discovered.dart';
 import '../transport.dart';
 import 'link.dart';
@@ -11,13 +8,7 @@ class LinuxBlePlatform extends UniversalBlePlatformBase {
   const LinuxBlePlatform();
 
   @override
-  Future<void> requestPermissions() async {
-    try {
-      await uble.UniversalBle.requestPermissions();
-    } catch (e) {
-      Log.error('[FlipperClient] Linux BLE permission request failed: $e');
-    }
-  }
+  String get platformLabel => 'Linux';
 
   @override
   Future<Transport> openTransport(BleDiscoveredDevice device) {

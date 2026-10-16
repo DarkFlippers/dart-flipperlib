@@ -1,6 +1,3 @@
-import 'package:universal_ble/universal_ble.dart' as uble;
-
-import '../../common/log.dart';
 import '../../model/discovered.dart';
 import '../transport.dart';
 import 'link.dart';
@@ -11,13 +8,7 @@ class WindowsBlePlatform extends UniversalBlePlatformBase {
   const WindowsBlePlatform();
 
   @override
-  Future<void> requestPermissions() async {
-    try {
-      await uble.UniversalBle.requestPermissions();
-    } catch (e) {
-      Log.error('[FlipperClient] Windows BLE permission request failed: $e');
-    }
-  }
+  String get platformLabel => 'Windows';
 
   @override
   Future<Transport> openTransport(BleDiscoveredDevice device) {
