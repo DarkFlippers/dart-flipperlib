@@ -15,6 +15,7 @@ export 'src/model/device.dart';
 export 'src/model/exceptions.dart';
 export 'src/common/log.dart';
 export 'src/model/connect_error.dart';
+export 'src/transport/ble/platform.dart' show BleAccess;
 export 'src/dfu/backend.dart';
 export 'src/dfu/dfu_detector.dart';
 export 'src/dfu/recovery_runner.dart';
