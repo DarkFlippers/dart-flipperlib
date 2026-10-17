@@ -165,6 +165,46 @@ void main() {
     }
   });
 
+  // A caller that awaits `connect` and then switches the session to RPC -
+  // which is what opening a link is - fails with one of these when the link
+  // dies in the gap between the two. Not something a BLE stack said: this
+  // library's own sentence for a transport that is no longer there. It
+  // matched no needle, so it reached the dialog as `unknown` and told
+  // somebody at the edge of range nothing about range. qUnleashed#363.
+  group('the link dropping under a connect', () {
+    // The anchors. Both sentences are thrown from a dozen places, all of
+    // which read these constants, so rewording one fails here rather than
+    // quietly going back to `unknown`.
+    for (final message in const [
+      noActiveTransportMessage,
+      transportClosedMessage,
+    ]) {
+      test('is read from "$message"', () {
+        expect(
+          classifyConnectError(message),
+          FlipperConnectErrorKind.deviceUnreachable,
+        );
+      });
+    }
+
+    // Which of the two the library will hand a test by itself: the no-session
+    // branch of `FlipperClient.switchToRpcMode`, not the torn-down-session
+    // one the incident took - `_requireTransport` needs a session, and a
+    // session needs a transport to have been open.
+    test('is what a client with no session rejects with', () async {
+      await expectLater(
+        FlipperClient().switchToRpcMode(),
+        throwsA(
+          isStateError.having(
+            (e) => e.message,
+            'message',
+            noActiveTransportMessage,
+          ),
+        ),
+      );
+    });
+  });
+
   group('being busy', () {
     for (final message in const [
       'ConnectionAlreadyExists',

@@ -1,5 +1,23 @@
 library;
 
+/// What a session with no transport raises, and what a transport raises once
+/// it is closed.
+///
+/// Constants rather than literals at the throw sites for the reason
+/// `FlipperClient.sessionLimitMessage` is one, and qUnleashed#363 is what it
+/// cost here. Note what does and does not keep them honest: the needles below
+/// are a third, hand-lowercased copy, so it is `connect_error_test.dart`
+/// classifying these constants - not their sitting in this file - that makes
+/// rewording either one fail a test instead of silently falling back to
+/// [FlipperConnectErrorKind.unknown].
+///
+/// They live here rather than on `FlipperClient` because the transports throw
+/// the second one and sit below the client in the import graph.
+const String noActiveTransportMessage = 'No active transport';
+
+/// See [noActiveTransportMessage].
+const String transportClosedMessage = 'Transport closed';
+
 enum FlipperConnectErrorKind {
   stalePairing,
   pairingIncomplete,
@@ -115,6 +133,22 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
     'not found',
     'disconnected',
     'session setup',
+    // The two that name the near end of the link rather than the peer: the
+    // transport was torn down under an operation somebody was waiting on.
+    // They describe the same event the needles above do, seen from this side,
+    // so they belong in the same bucket - a link that came up and died a
+    // second later is a device out of range, and the dialog should say so.
+    //
+    // Kept in step with `FlipperClient.isLinkDropError`, which already counts
+    // both as a drop an automatic reconnect can make whole again. The two
+    // disagreeing is the bug: a caller that awaits `connect` and then
+    // `switchToRpcMode` finds no transport in the gap between them when the
+    // link dies there, and `No active transport` reaching this function fell
+    // through to `unknown` - so a user at the edge of range was shown the
+    // generic "connection failed" instead of the one about range.
+    // qUnleashed#363.
+    'no active transport',
+    'transport closed',
   ])) {
     return FlipperConnectErrorKind.deviceUnreachable;
   }

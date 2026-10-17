@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:usb_serial/usb_serial.dart';
 
 import '../../common/log.dart';
+import '../../model/connect_error.dart';
 import '../../model/device.dart';
 import '../../model/discovered.dart';
 import '../../model/enums.dart';
@@ -100,7 +101,7 @@ class AndroidUsbTransport extends Transport {
   @override
   Future<void> rawWrite(Uint8List bytes) async {
     if (!isActive) {
-      throw StateError('Transport closed');
+      throw StateError(transportClosedMessage);
     }
     try {
       // The plugin offers no write timeout of its own; a hung native write
@@ -119,7 +120,7 @@ class AndroidUsbTransport extends Transport {
   @override
   Future<void> nudgeCli() async {
     if (!isActive) {
-      throw StateError('Transport closed');
+      throw StateError(transportClosedMessage);
     }
     await _port.setDTR(false);
     await Future<void>.delayed(const Duration(milliseconds: 80));
