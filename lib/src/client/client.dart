@@ -7,6 +7,7 @@ import 'package:universal_ble/universal_ble.dart' as uble;
 
 import '../../protobuf.dart';
 import '../common/log.dart';
+import '../model/connect_error.dart';
 import '../model/device.dart';
 import '../model/discovered.dart';
 import '../model/enums.dart';
@@ -476,7 +477,7 @@ class FlipperClient {
   FlipperSession _requireSessionFor(FlipperRequestPriority priority) {
     final session = _sessionFor(priority);
     if (session == null) {
-      throw StateError('No active transport');
+      throw StateError(noActiveTransportMessage);
     }
     return session;
   }
@@ -484,7 +485,7 @@ class FlipperClient {
   FlipperSession _requireCurrentSession() {
     final session = _currentSession;
     if (session == null) {
-      throw StateError('No active transport');
+      throw StateError(noActiveTransportMessage);
     }
     return session;
   }
@@ -1280,7 +1281,7 @@ class FlipperClient {
   Future<void> switchToRpcMode() {
     final session = _currentSession;
     if (session == null) {
-      return Future.error(StateError('No active transport'));
+      return Future.error(StateError(noActiveTransportMessage));
     }
     return session.switchToRpcMode();
   }
@@ -1299,7 +1300,7 @@ class FlipperClient {
   }) {
     final session = _currentSession;
     if (session == null) {
-      return Future.error(StateError('No active transport'));
+      return Future.error(StateError(noActiveTransportMessage));
     }
     return session.executeCli(command, timeout: timeout);
   }
@@ -1405,14 +1406,22 @@ class FlipperClient {
   // True for failures caused by the link dying (as opposed to an RPC-level
   // error from the firmware): these are the ones an automatic reconnect can
   // make whole again.
+  //
+  // Both constants are also `deviceUnreachable` needles in
+  // `classifyConnectError`, the user-facing reading of the same condition.
+  // Only on those two sentences, and only exactly: this `contains` is
+  // case-sensitive where the classifier lowercases first, so the six sites
+  // that embed a constant's words in a longer sentence - `Cannot fetch device
+  // info: no active transport`, `BLE transport closed` - are a drop to the
+  // classifier and not to this. qUnleashed#366.
   bool isLinkDropError(Object error) {
     if (error is FlipperTransportError) return true;
     if (error is StateError) {
       final message = error.message;
       return message.startsWith('Disconnected') ||
           message.startsWith('Request dropped') ||
-          message.contains('Transport closed') ||
-          message.contains('No active transport');
+          message.contains(transportClosedMessage) ||
+          message.contains(noActiveTransportMessage);
     }
     return false;
   }
@@ -1516,7 +1525,7 @@ class FlipperCliChannel {
   Future<void> nudge() {
     final transport = _session.transport;
     if (transport == null) {
-      return Future.error(StateError('No active transport'));
+      return Future.error(StateError(noActiveTransportMessage));
     }
     return transport.nudgeCli();
   }

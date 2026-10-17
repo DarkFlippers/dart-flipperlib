@@ -3,6 +3,7 @@ import 'dart:isolate';
 import 'dart:typed_data';
 
 import '../../common/log.dart';
+import '../../model/connect_error.dart';
 import '../../model/discovered.dart';
 import '../../model/enums.dart';
 import '../transport.dart';
@@ -113,7 +114,7 @@ abstract class SerialUsbTransportBase extends Transport {
   @override
   Future<void> rawWrite(Uint8List bytes) {
     if (!isActive) {
-      return Future.error(StateError('Transport closed'));
+      return Future.error(StateError(transportClosedMessage));
     }
     final seq = _writeSeq++;
     final completer = Completer<void>();
@@ -125,7 +126,7 @@ abstract class SerialUsbTransportBase extends Transport {
   @override
   Future<void> nudgeCli() async {
     if (!isActive) {
-      throw StateError('Transport closed');
+      throw StateError(transportClosedMessage);
     }
     _commandPort.send(const DesktopUsbDtrPulse());
     await Future<void>.delayed(const Duration(milliseconds: 200));
@@ -213,7 +214,7 @@ abstract class SerialUsbTransportBase extends Transport {
     await _eventSub?.cancel();
     _eventSub = null;
     _eventPort.close();
-    _failInFlight(StateError('Transport closed'));
+    _failInFlight(StateError(transportClosedMessage));
     _releaseFinished = true;
   }
 }

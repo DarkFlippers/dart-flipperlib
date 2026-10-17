@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import '../common/log.dart';
+import '../model/connect_error.dart';
 import '../model/enums.dart';
 
 class FlipperTransportError implements Exception {
@@ -80,7 +81,7 @@ abstract class Transport {
 
   Future<void> write(Uint8List bytes) {
     if (!isActive) {
-      return Future.error(StateError('Transport closed'));
+      return Future.error(StateError(transportClosedMessage));
     }
     final pending = TransportPendingWrite(bytes);
     _writeQueue.add(pending);
@@ -98,7 +99,7 @@ abstract class Transport {
     while (_writeQueue.isNotEmpty) {
       final pending = _writeQueue.removeAt(0);
       if (!isActive) {
-        pending.fail(StateError('Transport closed'));
+        pending.fail(StateError(transportClosedMessage));
         continue;
       }
       try {
@@ -143,7 +144,7 @@ abstract class Transport {
   Future<void> close() async {
     if (_lifecycle != TransportLifecycle.active) return;
     _lifecycle = TransportLifecycle.closing;
-    _failPendingWrites(StateError('Transport closed'));
+    _failPendingWrites(StateError(transportClosedMessage));
     try {
       await doClose();
     } catch (e) {

@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import '../client/client.dart';
 import '../../protobuf.dart';
 import '../common/log.dart';
+import '../model/connect_error.dart';
 import '../model/device.dart';
 import '../model/enums.dart';
 import '../model/exceptions.dart';
@@ -1351,7 +1352,7 @@ class FlipperSession {
   Transport _requireTransport() {
     final transport = this.transport;
     if (transport == null) {
-      throw StateError('No active transport');
+      throw StateError(noActiveTransportMessage);
     }
     return transport;
   }
