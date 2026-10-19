@@ -5,11 +5,12 @@ library;
 ///
 /// Constants rather than literals at the throw sites for the reason
 /// `FlipperClient.sessionLimitMessage` is one, and qUnleashed#363 is what it
-/// cost here. Note what does and does not keep them honest: the needles below
-/// are a third, hand-lowercased copy, so it is `connect_error_test.dart`
-/// classifying these constants - not their sitting in this file - that makes
-/// rewording either one fail a test instead of silently falling back to
-/// [FlipperConnectErrorKind.unknown].
+/// cost here. [namesLinkDrop] is what holds the two readings of a dropped link
+/// to one answer - it lowercases these two rather than keeping a copy, so a
+/// reword moves both readings together. It cannot make a reword *safe*: six
+/// sites spell these sentences out as literals, and what catches a reword that
+/// leaves them behind is `connect_error_test.dart` asserting on those literals
+/// rather than on the constants.
 ///
 /// They live here rather than on `FlipperClient` because the transports throw
 /// the second one and sit below the client in the import graph.
@@ -17,6 +18,45 @@ const String noActiveTransportMessage = 'No active transport';
 
 /// See [noActiveTransportMessage].
 const String transportClosedMessage = 'Transport closed';
+
+/// True when [message] names the near end of the link going away.
+///
+/// The single reading of that condition, shared by [classifyConnectError]
+/// below - which dresses it up for a user - and
+/// `FlipperClient.isLinkDropError`, which decides whether an automatic
+/// reconnect can make the failure whole again. They used to match the same two
+/// sentences apart from each other and with different case policies: the
+/// classifier lowercased its input, the predicate did a case-sensitive
+/// `contains`. So the two sentences that embed a constant's words inside a
+/// longer one - `Cannot fetch device info: no active transport` at three
+/// sites, `BLE transport closed` at three more - were a drop to one reading
+/// and not to the other. qUnleashed#366.
+///
+/// That divergence is the defect, and it was latent rather than something a
+/// user hit: the only caller that acts on the drop reading is
+/// `storageWriteChunked`, and every failure that reaches its catch today is
+/// either a `FlipperTransportError` (matched by type) or carries a constant
+/// whole - the request queue wraps a failed write, and a teardown prefixes
+/// `Disconnected:`. Neither of the six sites is on that path. What the two
+/// readings disagreeing cost is the next caller, and a reword of either
+/// sentence away from the constants' case.
+///
+/// Case-insensitive because the sentences are written for a person at the
+/// throw site, and whether the words land mid-sentence or start one is not a
+/// fact about the link. [message] may already be lowercased - both callers
+/// hand over a lowered string today - and lowering twice costs nothing, so
+/// neither has to know.
+bool namesLinkDrop(String message) {
+  final lower = message.toLowerCase();
+  return lower.contains(_noActiveTransportNeedle) ||
+      lower.contains(_transportClosedNeedle);
+}
+
+/// The needles [namesLinkDrop] matches, derived from the constants rather than
+/// written out again - a hand-lowercased copy is what had to be kept in step
+/// by hand, and was not.
+final String _noActiveTransportNeedle = noActiveTransportMessage.toLowerCase();
+final String _transportClosedNeedle = transportClosedMessage.toLowerCase();
 
 enum FlipperConnectErrorKind {
   stalePairing,
@@ -117,6 +157,19 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
     return FlipperConnectErrorKind.busy;
   }
 
+  // The near end of the link rather than the peer: the transport was torn down
+  // under an operation somebody was waiting on. That is the same event the
+  // needles below describe, seen from this side, so it belongs in the same
+  // bucket - a link that came up and died a second later is a device out of
+  // range, and the dialog should say so. A caller that awaits `connect` and
+  // then `switchToRpcMode` finds no transport in the gap between them when the
+  // link dies there, and `No active transport` reaching this function fell
+  // through to `unknown` - so a user at the edge of range was shown the generic
+  // "connection failed" instead of the one about range. qUnleashed#363.
+  if (namesLinkDrop(e)) {
+    return FlipperConnectErrorKind.deviceUnreachable;
+  }
+
   if (has([
     'devicenotfound',
     'connectiontimeout',
@@ -133,22 +186,6 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
     'not found',
     'disconnected',
     'session setup',
-    // The two that name the near end of the link rather than the peer: the
-    // transport was torn down under an operation somebody was waiting on.
-    // They describe the same event the needles above do, seen from this side,
-    // so they belong in the same bucket - a link that came up and died a
-    // second later is a device out of range, and the dialog should say so.
-    //
-    // Kept in step with `FlipperClient.isLinkDropError`, which already counts
-    // both as a drop an automatic reconnect can make whole again. The two
-    // disagreeing is the bug: a caller that awaits `connect` and then
-    // `switchToRpcMode` finds no transport in the gap between them when the
-    // link dies there, and `No active transport` reaching this function fell
-    // through to `unknown` - so a user at the edge of range was shown the
-    // generic "connection failed" instead of the one about range.
-    // qUnleashed#363.
-    'no active transport',
-    'transport closed',
   ])) {
     return FlipperConnectErrorKind.deviceUnreachable;
   }

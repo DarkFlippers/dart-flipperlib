@@ -1407,21 +1407,25 @@ class FlipperClient {
   // error from the firmware): these are the ones an automatic reconnect can
   // make whole again.
   //
-  // Both constants are also `deviceUnreachable` needles in
-  // `classifyConnectError`, the user-facing reading of the same condition.
-  // Only on those two sentences, and only exactly: this `contains` is
-  // case-sensitive where the classifier lowercases first, so the six sites
-  // that embed a constant's words in a longer sentence - `Cannot fetch device
-  // info: no active transport`, `BLE transport closed` - are a drop to the
-  // classifier and not to this. qUnleashed#366.
+  // The transport sentences go through `namesLinkDrop`, which is also what
+  // `classifyConnectError` matches them with - so this and the user-facing
+  // reading of the same condition cannot drift apart again. They had:
+  // `BLE transport closed` and `Cannot fetch device info: no active transport`
+  // were a drop to the classifier and not to this, because this `contains` was
+  // case-sensitive where the classifier lowercases first. qUnleashed#366.
+  //
+  // The other two are this library's own prefixes, from a teardown and from a
+  // request pulled out of the queue, and are lowered for the same reason -
+  // what a sentence is capitalised like is not a fact about the link. The
+  // lowering is per-check on purpose: `namesLinkDrop` does its own, so neither
+  // depends on the other having happened.
   bool isLinkDropError(Object error) {
     if (error is FlipperTransportError) return true;
     if (error is StateError) {
-      final message = error.message;
-      return message.startsWith('Disconnected') ||
-          message.startsWith('Request dropped') ||
-          message.contains(transportClosedMessage) ||
-          message.contains(noActiveTransportMessage);
+      final lowered = error.message.toLowerCase();
+      return lowered.startsWith('disconnected') ||
+          lowered.startsWith('request dropped') ||
+          namesLinkDrop(error.message);
     }
     return false;
   }

@@ -172,9 +172,9 @@ void main() {
   // matched no needle, so it reached the dialog as `unknown` and told
   // somebody at the edge of range nothing about range. qUnleashed#363.
   group('the link dropping under a connect', () {
-    // The anchors. Both sentences are thrown from a dozen places, all of
-    // which read these constants, so rewording one fails here rather than
-    // quietly going back to `unknown`.
+    // The anchors. Both sentences are raised from a dozen places - fourteen of
+    // which read these constants, six of which spell them out (see below) - so
+    // rewording one fails here rather than quietly going back to `unknown`.
     for (final message in const [
       noActiveTransportMessage,
       transportClosedMessage,
@@ -186,6 +186,85 @@ void main() {
         );
       });
     }
+
+    // The sentences as the six sites hold them, which is not how the constants
+    // are spelled: both embed a constant's words inside a longer phrase, and
+    // one lowercases them. They are read by two predicates - this one for the
+    // dialog, `isLinkDropError` for whether a reconnect can make the failure
+    // whole - and the two used to match separately, with different case
+    // policies, so these sites were a drop to one and not to the other. Both
+    // now go through `namesLinkDrop`; asserting on both here is what holds
+    // them together, and asserting on the literals rather than the constants
+    // is what catches a site reworded away from them. qUnleashed#366.
+    for (final sentence in const [
+      // `client.dart` x2, `session/session.dart`.
+      'Cannot fetch device info: no active transport',
+      // `transport/ble/link.dart` x3.
+      'BLE transport closed',
+    ]) {
+      test('is read from "$sentence" by both readings', () {
+        expect(
+          classifyConnectError(sentence),
+          FlipperConnectErrorKind.deviceUnreachable,
+        );
+        expect(
+          FlipperClient().isLinkDropError(StateError(sentence)),
+          isTrue,
+          reason: 'a reconnect can make this one whole again',
+        );
+      });
+    }
+
+    // Case is not a fact about the link, so neither reading may turn on it.
+    // `isLinkDropError` is the one that did: `classifyConnectError` lowercases
+    // its input before `namesLinkDrop` ever sees it, so the classifier half of
+    // this cannot fail and is here only to say the two agree.
+    test('is read whatever case the sentence arrives in', () {
+      for (final sentence in const [
+        'NO ACTIVE TRANSPORT',
+        'Transport Closed',
+      ]) {
+        expect(namesLinkDrop(sentence), isTrue, reason: sentence);
+        expect(
+          FlipperClient().isLinkDropError(StateError(sentence)),
+          isTrue,
+          reason: sentence,
+        );
+        expect(
+          classifyConnectError(sentence),
+          FlipperConnectErrorKind.deviceUnreachable,
+        );
+      }
+    });
+
+    // The new check sits below pairing and busy, where the needles it replaced
+    // sat. Block order is the behaviour in this function, so it is asserted
+    // rather than left to the reader of the diff.
+    test('loses to a sentence that also names a pairing fault', () {
+      expect(
+        classifyConnectError('PairingTimeout: transport closed'),
+        FlipperConnectErrorKind.pairingIncomplete,
+      );
+    });
+
+    test('loses to a sentence that also says the stack is busy', () {
+      expect(
+        classifyConnectError('OperationInProgress: no active transport'),
+        FlipperConnectErrorKind.busy,
+      );
+    });
+
+    // And a sentence about something else is still not one, which is the half
+    // of a shared reading that a widening could quietly take away.
+    test('is not read from a firmware error that names no transport', () {
+      expect(namesLinkDrop('Storage error: ERROR_STORAGE_DENIED'), isFalse);
+      expect(
+        FlipperClient().isLinkDropError(
+          StateError('Storage error: ERROR_STORAGE_DENIED'),
+        ),
+        isFalse,
+      );
+    });
 
     // Which of the two the library will hand a test by itself: the no-session
     // branch of `FlipperClient.switchToRpcMode`, not the torn-down-session
