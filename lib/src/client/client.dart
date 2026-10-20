@@ -584,7 +584,8 @@ class FlipperClient {
         return;
       }
 
-      final state = await uble.UniversalBle.getBluetoothAvailabilityState();
+      // Through the platform, not the plugin: see [BlePlatform.availabilityState].
+      final state = await blePlatform.availabilityState();
       if (state != uble.AvailabilityState.poweredOn) {
         Log.info('[FlipperClient] BLE adapter state: $state');
         return;
@@ -885,8 +886,17 @@ class FlipperClient {
 
   Future<void> _awaitBleAvailable(Duration timeout) async {
     try {
-      final state = await uble.UniversalBle.getBluetoothAvailabilityState();
+      // Through the platform, not the plugin: see [BlePlatform.availabilityState].
+      final state = await blePlatform.availabilityState();
       if (state == uble.AvailabilityState.poweredOn) return;
+      if (state == uble.AvailabilityState.unsupported) {
+        // Nothing to wait for. Waiting spends the whole
+        // [bleAvailabilityWait] on a radio that is not going to appear, and
+        // then falls through to connect anyway - which is right for a reason
+        // that might be wrong, but not after five silent seconds of it.
+        Log.info('[BLE] no adapter on this machine; not waiting');
+        return;
+      }
       Log.info('[BLE] adapter is $state; waiting for it to power on');
       await uble.UniversalBle.availabilityStream
           .firstWhere((s) => s == uble.AvailabilityState.poweredOn)

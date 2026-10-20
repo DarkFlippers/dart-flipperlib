@@ -5,8 +5,10 @@
 // device list reads identically for a denial and an empty room, and the
 // denial was the only thing that could have told them apart.
 //
-// The fake below stubs `availabilityState()` and nothing else, so the body
-// under test is the real `requestPermissions` and the real `accessFor`. A
+// The fake below stubs `askPluginForAvailability()` - the plugin read, and
+// the only thing it stands in for - so the body under test is the real
+// `requestPermissions`, the real `availabilityState` and the real
+// `accessFor`. A
 // fake that carried its own copy of the mapping would have passed on its own
 // copy being right, which CLAUDE.md names as this repository's most
 // productive way of writing a test that proves nothing.
@@ -22,9 +24,10 @@ import 'package:universal_ble/universal_ble.dart' as uble;
 
 /// Drives the real base class with the plugin replaced.
 ///
-/// [availabilityState] is the only override, which is exactly the platform
-/// boundary: everything the change is about — the ask, the catch that falls
-/// through to the read, and the mapping — is the base's own code running.
+/// The plugin read is the only thing stood in for; [availabilityState] itself
+/// is the base's own body, which is exactly the platform boundary. Everything
+/// the change is about — the ask, the catch that falls through to the read,
+/// the delegation, and the mapping — is the base's own code running.
 class _FakePlatform extends UniversalBlePlatformBase {
   _FakePlatform(this._state, {this.askThrows = false, this.readThrows = false});
 
@@ -44,8 +47,12 @@ class _FakePlatform extends UniversalBlePlatformBase {
     if (askThrows) throw StateError('another request is already running');
   }
 
+  // The plugin call and not `availabilityState()`, which is policy: standing
+  // in here leaves the base's own delegation under test, so inlining the
+  // plugin call back into `availabilityState` fails something. See the rule on
+  // `UniversalBlePlatformBase.availabilityState`.
   @override
-  Future<uble.AvailabilityState> availabilityState() async {
+  Future<uble.AvailabilityState> askPluginForAvailability() async {
     reads++;
     if (readThrows) throw StateError('no adapter');
     return _state;

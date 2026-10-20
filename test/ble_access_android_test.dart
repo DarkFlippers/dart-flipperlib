@@ -2,8 +2,8 @@
 //
 // This file exists because the first version of `BleAccess` got Android
 // exactly wrong, and `ble_access_test.dart` could not see it. That test stubs
-// `availabilityState()` and proves the *mapping*; it says nothing about
-// whether the platform ever produces the state being mapped.
+// the plugin read and proves the *mapping*; it says nothing about whether the
+// platform ever produces the state being mapped.
 //
 // On Android it does not. universal_ble implements the availability read as
 // `bluetoothManager.adapter.state` (UniversalBlePlugin.kt) mapped through
@@ -30,8 +30,8 @@ import 'package:universal_ble/universal_ble.dart' as uble;
 
 /// The real [AndroidBlePlatform] with its two plugin calls stubbed.
 ///
-/// Overriding only `hasScanPermission()` and `availabilityState()` is the
-/// point: the ordering under test - permission first, adapter second, and the
+/// Overriding only `hasScanPermission()` and `askPluginForAvailability()` is
+/// the point: the ordering under test - permission first, adapter second, and the
 /// adapter never consulted for a refusal - is the production body running. A
 /// fake that carried its own copy of that ordering would pass on its own copy
 /// being right, which is how the bug this file exists for survived its first
@@ -57,8 +57,11 @@ class _StubbedAndroid extends AndroidBlePlatform {
     return permitted;
   }
 
+  // The plugin call, not `availabilityState()`: Android does not override the
+  // latter, so standing in here keeps the base's delegation under test too.
+  // See the rule on `UniversalBlePlatformBase.availabilityState`.
   @override
-  Future<uble.AvailabilityState> availabilityState() async {
+  Future<uble.AvailabilityState> askPluginForAvailability() async {
     adapterReads++;
     return adapter;
   }
