@@ -19,6 +19,72 @@ const String noActiveTransportMessage = 'No active transport';
 /// See [noActiveTransportMessage].
 const String transportClosedMessage = 'Transport closed';
 
+/// What the BLE link raises when a connected device presents no Flipper
+/// service, or one without the characteristics the RPC runs over.
+///
+/// A constant for the same reason as the two above, and with a sharper edge:
+/// this sentence is the *only* thing distinguishing a device whose GATT cache
+/// is stale from any other failed connect, so a reword at the throw site that
+/// did not move the needle with it would put the kind back to `unknown` - and
+/// nothing would say so, because the dialog has a sentence for `unknown` too.
+/// One case in `connect_error_test.dart` spells the literal out rather than
+/// reading this constant, for exactly that reason - the others use the
+/// constant, which is the right trade for everything except the reword.
+/// QUNLEASHED-Y.
+///
+/// The thrown message appends the list of what was missing, so the needle is
+/// this prefix and not the whole sentence.
+const String missingCharacteristicsMessage =
+    'Missing Flipper BLE characteristics';
+
+/// A connected device that presented no Flipper service, or one without the
+/// characteristics the RPC runs over.
+///
+/// Typed, so [classifyConnectError] reads the fact rather than re-parsing a
+/// sentence this library wrote one frame earlier. That is the established
+/// shape in this subsystem rather than a new one:
+/// `FlipperClient.isLinkDropError` checks `FlipperTransportError` ahead of its
+/// own needles, and `FlipperCancelledException`'s doc in `exceptions.dart`
+/// already settles the question in as many words - "not a sealed failure
+/// hierarchy - ADR 0008 rejects those and this is not one". ADR 0008 rejects
+/// sealed hierarchies and result types; one named error for one's own throw
+/// is neither.
+///
+/// [missing] is what was absent, which until now lived only inside a
+/// sentence nothing parsed. Nothing reads it yet: the dialog shows one
+/// sentence for every shape of this failure, and the field is here so that
+/// the next reader of it does not have to re-parse the message.
+///
+/// It is deliberately *not* claimed that the list separates the two causes.
+/// It cannot, twice over. The entries are pre-rendered `name(uuid)` strings,
+/// so telling `rpcStatus` alone from the rest means matching text again -
+/// the regex moved out of [classifyConnectError] and into the caller. And
+/// `missing.length == 4` is ambiguous at the throw site: in `link.dart` the
+/// four nulls arise both when no service matched the Flipper UUID at all and
+/// when one matched without the characteristics. All four gone is *usually*
+/// a stale Android service cache and `rpcStatus` alone *usually* old
+/// firmware, but neither is decidable from this field. Typing the entries
+/// and carrying service-presence from the throw site is what would make them
+/// so, and is a task of its own.
+///
+/// The message still reads as [missingCharacteristicsMessage] and the needle
+/// in [classifyConnectError] still matches it, so a plain `StateError`
+/// carrying those words - from an older build of this library, or from
+/// anything else that spells them out - classifies the same way.
+/// `base`, because this is exported wholesale by the barrel and Dart lets a
+/// subclass replace a field with a getter: one override of [missing] or of
+/// `message` breaks the derived message, `toString()`, and the needle
+/// fallback together. Nothing extends it.
+base class FlipperServicesMissingError extends StateError {
+  FlipperServicesMissingError(List<String> missing)
+    : assert(missing.isNotEmpty, 'nothing missing is not this failure'),
+      missing = List.unmodifiable(missing),
+      super('$missingCharacteristicsMessage: ${missing.join(', ')}');
+
+  /// What was absent, each as `tx(uuid)` or `rpcStatus(uuid)`.
+  final List<String> missing;
+}
+
 /// True when [message] names the near end of the link going away.
 ///
 /// The single reading of that condition, shared by [classifyConnectError]
@@ -63,6 +129,16 @@ enum FlipperConnectErrorKind {
   pairingIncomplete,
   bluetoothUnavailable,
   deviceUnreachable,
+
+  /// The link came up and is useless: no Flipper service on it.
+  ///
+  /// Separate from [deviceUnreachable] because the device *did* answer, and
+  /// separate from [stalePairing] because the bond is intact - what is stale
+  /// is Android's cached GATT service list, which a reconnect or a Bluetooth
+  /// toggle refreshes and forgetting the device forces. Telling somebody to
+  /// move closer, which is what `deviceUnreachable` says, would be wrong
+  /// advice for a device sitting next to them. QUNLEASHED-Y.
+  servicesMissing,
   tooManyDevices,
 
   /// This library's own cap on held links, not the platform's.
@@ -79,6 +155,13 @@ enum FlipperConnectErrorKind {
 }
 
 FlipperConnectErrorKind classifyConnectError(Object error) {
+  // Read before any string is, because this one is ours and carries the fact
+  // structurally. The needle further down stays as the fallback for the same
+  // words arriving untyped.
+  if (error is FlipperServicesMissingError) {
+    return FlipperConnectErrorKind.servicesMissing;
+  }
+
   final e = error.toString().toLowerCase();
   bool has(List<String> needles) => needles.any(e.contains);
 
@@ -122,6 +205,31 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
     'bluetooth is powered off',
     'unauthorized',
     'not authorized',
+    // A refused runtime permission, which on Android reaches us as the name
+    // of the permission and not as anything about Bluetooth: a scan below
+    // Android 12 needs `ACCESS_FINE_LOCATION`, and `universal_ble` reports
+    // the refusal as `Permissions denied: android.permission.…`. It belongs
+    // in this bucket because this bucket's sentence is already the right
+    // one - "turn Bluetooth on and allow this app to use it in your system
+    // settings" - and because the alternative was `unknown`, which told a
+    // user with a revoked permission to toggle Bluetooth. QUNLEASHED-Z.
+    //
+    // The plural only, which is what was seen. The singular is deliberately
+    // absent: as a bare substring it captures two strings on the *USB* path -
+    // `USB permission denied or port unavailable` from
+    // `transport/usb/android.dart` when somebody dismisses Android's USB
+    // prompt, and `Permission denied (code 13)` from the desktop serial open,
+    // which is `strerror(EACCES)` and the most common Linux serial failure
+    // there is (a user not in `dialout`). Both would land in a kind named for
+    // Bluetooth, and this kind has no USB sentence to fall back on, so the
+    // dialog would tell a desktop user with a cable to turn Bluetooth on.
+    // They reach `unknown` instead, whose USB body says to re-seat the cable.
+    //
+    // `telemetry.dart` names this hazard class: the needles generic enough to
+    // catch a USB failure file it under a kind named for Bluetooth. This
+    // would have been the first one matching a sentence flipperlib writes
+    // itself rather than a platform string. The cases below pin both.
+    'permissions denied',
   ])) {
     return FlipperConnectErrorKind.bluetoothUnavailable;
   }
@@ -155,6 +263,19 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
     'in progress',
   ])) {
     return FlipperConnectErrorKind.busy;
+  }
+
+  // The same condition as the type check at the top, for those words
+  // arriving without the type. Lowered inline rather than hoisted into a
+  // file-level needle: the two at the head of this file are hoisted because
+  // `namesLinkDrop` is the one place that reads them and two predicates had
+  // to agree on it, which is not the shape here - this is read once, from
+  // inside `has`, like every other block.
+  //
+  // This library's own sentence, so it shares no words with any needle above
+  // or below and its position here is for reading order, not precedence.
+  if (has([missingCharacteristicsMessage.toLowerCase()])) {
+    return FlipperConnectErrorKind.servicesMissing;
   }
 
   // The near end of the link rather than the peer: the transport was torn down
