@@ -250,7 +250,24 @@ Future<void> _runRecovery(
   void Function(Object) send,
 ) async {
   if (!backend.available || Libusb.instance == null) {
-    throw StateError('Raw USB (libusb) is not available on this platform');
+    // The reason has to travel in the message. `Libusb.instance` logs why it
+    // gave up, but this runs in the recovery isolate, whose `Log.sink` nothing
+    // sets - which is what `RecoveryLog` exists for - so that line goes
+    // nowhere. And "not available on this platform" became false when
+    // `instance` started answering null for a libusb that loaded without a
+    // symbol it binds: that one is a package to install, not a machine to
+    // give up on, and the user is the only one who can act on the difference.
+    //
+    // `DfuHostException` and not `StateError`, because this sentence is shown
+    // to a user. The `other` arm renders the message verbatim
+    // (`firmware/installer.dart`), and `StateError.toString()` would have put
+    // "Bad state: " in front of it - which is exactly what this class's
+    // `toString() => message` exists to avoid.
+    throw const DfuHostException(
+      DfuHostFailure.other,
+      'Raw USB (libusb) could not be initialised: it is either absent on this '
+      'platform or too old for this build',
+    );
   }
 
   _validateOptionBytesRequest(req);

@@ -68,9 +68,14 @@ class UsbDeviceBackend {
       _handle = out.value;
       _device = _usb.getDevice(_handle);
       // Best-effort: lets us claim an interface the kernel may have bound.
-      try {
-        _usb.setAutoDetachKernelDriver(_handle, 1);
-      } catch (_) {}
+      // Null when the loaded libusb does not have it, which is the same
+      // best-effort the `try` already expressed - now said in the type.
+      final setAutoDetach = _usb.setAutoDetachKernelDriver;
+      if (setAutoDetach != null) {
+        try {
+          setAutoDetach(_handle, 1);
+        } catch (_) {}
+      }
       return true;
     } finally {
       malloc.free(out);

@@ -301,9 +301,6 @@ typedef LibusbUnrefDevice = void Function(Pointer<LibusbDevice>);
 class Libusb {
   Libusb._(this._lib) {
     init = _lib.lookupFunction<_InitNative, LibusbInit>('libusb_init');
-    initContext = _lib.lookupFunction<_InitContextNative, LibusbInitContext>(
-      'libusb_init_context',
-    );
     exit = _lib.lookupFunction<_ExitNative, LibusbExit>('libusb_exit');
     wrapSysDevice = _lib
         .lookupFunction<_WrapSysDeviceNative, LibusbWrapSysDevice>(
@@ -356,10 +353,6 @@ class Libusb {
     errorName = _lib.lookupFunction<_ErrorNameNative, LibusbErrorName>(
       'libusb_error_name',
     );
-    setAutoDetachKernelDriver = _lib
-        .lookupFunction<_SetAutoDetachNative, LibusbSetAutoDetach>(
-          'libusb_set_auto_detach_kernel_driver',
-        );
     refDevice = _lib.lookupFunction<_RefDeviceNative, LibusbRefDevice>(
       'libusb_ref_device',
     );
@@ -371,7 +364,53 @@ class Libusb {
   final DynamicLibrary _lib;
 
   late final LibusbInit init;
-  late final LibusbInitContext initContext;
+
+  /// Null when the loaded libusb predates the symbol.
+  ///
+  /// The rule this follows, which is the one to apply to the next symbol added
+  /// here: eager in the constructor is the default; above [floorVersion] a
+  /// nullable `_lookupX` helper is **mandatory**; below the floor it is
+  /// *permitted* when the one call site is genuinely best-effort, which is
+  /// what [setAutoDetachKernelDriver] is. Only the first of those three is
+  /// enforced by `libusb_symbol_binding_test.dart`.
+  /// `libusb_init_context` arrived in **1.0.27**, so it is over the line.
+  /// `libusb_wrap_sys_device` is also read only on Android but landed in
+  /// 1.0.23, so it stays eager; being Android-only is not the property that
+  /// matters here, and reading it as though it were is how the next one lands
+  /// in the wrong group.
+  ///
+  /// A generic `_required<N, F>` / `_optional<N, F>` pair would say this in
+  /// the API instead of in prose, and it does not compile: `lookupFunction`
+  /// requires a statically concrete native type, so a type parameter in that
+  /// position is `must_be_a_native_function_type`. Hence a named helper per
+  /// optional symbol, and `libusb_symbol_binding_test.dart` holding the rule
+  /// the types cannot.
+  ///
+  /// Resolving this eagerly made it a required symbol on every platform.
+  /// On a desktop libusb older than 1.0.27 the lookup threw `ArgumentError`
+  /// out of the constructor, and the first caller at launch reaches it from
+  /// `DeviceController`'s field initialiser while the widget tree is being
+  /// built - so it was reported through `FlutterError.onError` from `build`,
+  /// and the app rendered an error widget instead of itself on every launch,
+  /// re-throwing on each rebuild (QUNLEASHED-11).
+  ///
+  /// Nullable rather than a lazy throw, which is what this was first fixed to
+  /// be. Absence is null here as everywhere else (ADR 0009), and a throwing
+  /// `late final` is worse than it looks: the field stays unassigned, so it
+  /// re-runs and re-throws on **every** read rather than latching the way
+  /// `_unavailable` and `_initFailed` do. Measured, not assumed.
+  late final LibusbInitContext? initContext = _lookupInitContext();
+
+  LibusbInitContext? _lookupInitContext() {
+    try {
+      return _lib.lookupFunction<_InitContextNative, LibusbInitContext>(
+        'libusb_init_context',
+      );
+    } on ArgumentError {
+      return null;
+    }
+  }
+
   late final LibusbExit exit;
   late final LibusbWrapSysDevice wrapSysDevice;
   late final LibusbGetDevice getDevice;
@@ -388,7 +427,25 @@ class Libusb {
   late final LibusbFreeConfigDescriptor freeConfigDescriptor;
   late final LibusbGetStringDescriptorAscii getStringDescriptorAscii;
   late final LibusbErrorName errorName;
-  late final LibusbSetAutoDetach setAutoDetachKernelDriver;
+
+  /// Null when absent, because the call site already treats it as
+  /// best-effort: `usb_device.dart` claims an interface the kernel may have
+  /// bound, inside its own `try`. It has been in libusb since 1.0.16, so this
+  /// is about saying what the code means rather than about exposure - bound
+  /// eagerly, an optional capability could take the whole backend down.
+  late final LibusbSetAutoDetach? setAutoDetachKernelDriver =
+      _lookupSetAutoDetach();
+
+  LibusbSetAutoDetach? _lookupSetAutoDetach() {
+    try {
+      return _lib.lookupFunction<_SetAutoDetachNative, LibusbSetAutoDetach>(
+        'libusb_set_auto_detach_kernel_driver',
+      );
+    } on ArgumentError {
+      return null;
+    }
+  }
+
   late final LibusbRefDevice refDevice;
   late final LibusbUnrefDevice unrefDevice;
 
@@ -401,11 +458,26 @@ class Libusb {
     }
   }
 
+  /// The oldest libusb this build commits to supporting.
+  ///
+  /// Nothing enforces it, and [_tryLoad] says so itself: that probe asks for
+  /// `libusb_init`, which has been there since 1.0.0, so it would accept far
+  /// older. This is a policy, declared once so the rule on [initContext] has
+  /// something to be measured against.
+  ///
+  /// It is a distro libusb, because that is what a desktop has: 1.0.23 on
+  /// Ubuntu 20.04, 1.0.25 on 22.04. Android's is the one built from
+  /// `src/libusb` and is current, but a symbol is bound for every platform, so
+  /// the floor is what decides.
+  static const String floorVersion = '1.0.23';
+
   static Libusb? _instance;
   static bool _unavailable = false;
 
-  /// Loads libusb once per isolate. Returns null when the platform has no
-  /// libusb build (so callers can degrade gracefully instead of crashing).
+  /// Loads libusb once per isolate. Returns null when libusb cannot be
+  /// loaded, **or** loads without a symbol the constructor binds, so callers
+  /// can degrade gracefully instead of crashing. The second case was added
+  /// with the catch below; before it, that was a throw.
   static Libusb? get instance {
     if (_instance != null) return _instance;
     if (_unavailable) return null;
@@ -414,7 +486,29 @@ class Libusb {
       _unavailable = true;
       return null;
     }
-    return _instance = Libusb._(lib);
+    try {
+      return _instance = Libusb._(lib);
+    } catch (e) {
+      // A library that loads and then turns out not to have one of the symbols
+      // the constructor binds. Those are the ones the enumeration and transfer
+      // paths use, so there is nothing to degrade to here - a partial DFU
+      // backend is not worth shipping. But the caller asked whether libusb is
+      // available, and "no" is an answer every one of them already handles.
+      //
+      // This is the general half of the QUNLEASHED-11 fix and the part worth
+      // keeping: it turns "libusb loaded and is inadequate" into that same
+      // null for any symbol *the constructor binds*, not only the one that
+      // was reported. The two resolved outside it answer null themselves. Which
+      // leaves the eager/lazy rule on [initContext] deciding how coarsely we
+      // degrade, rather than whether we crash.
+      //
+      // The eager lookups stay eager on purpose. A library we have committed
+      // to that is missing something is worth finding out once, here, rather
+      // than from whichever transfer reaches the gap first.
+      Log.error('[DFU] libusb loaded without the symbols it needs: $e');
+      _unavailable = true;
+      return null;
+    }
   }
 
   static DynamicLibrary? _tryLoad() {
@@ -447,7 +541,13 @@ class Libusb {
     for (final load in candidates) {
       try {
         final lib = load();
-        // Confirm the symbols are actually here before committing to this lib.
+        // Tells libusb from whatever else the candidate resolved to, and
+        // nothing more: `libusb_init` has been there since 1.0.0, so a
+        // library that passes this can still be missing anything added
+        // since. It is not a version check and must not be read as one - that
+        // misreading is how a 1.0.27 symbol became a required one
+        // (QUNLEASHED-11). What the version actually gates is documented where
+        // the symbol is bound, not here.
         lib.lookup<NativeFunction<_InitNative>>('libusb_init');
         return lib;
       } catch (_) {
@@ -478,10 +578,22 @@ abstract final class LibusbSession {
     try {
       final int err;
       if (Platform.isAndroid) {
+        final initContext = usb.initContext;
+        if (initContext == null) {
+          // Cannot happen with the library this plugin builds, and that
+          // sentence is exactly what QUNLEASHED-11 was, so it is answered
+          // rather than asserted. This getter is documented to return null on
+          // failure and `usb_device.dart` checks for it; letting a missing
+          // symbol propagate instead would reach a `Timer.periodic` callback
+          // with nothing between it and the root zone.
+          Log.error('[DFU] libusb has no libusb_init_context');
+          _initFailed = true;
+          return null;
+        }
         final options = calloc<LibusbInitOption>();
         try {
           options.ref.option = libusbOptionNoDeviceDiscovery;
-          err = usb.initContext(out, options, 1);
+          err = initContext(out, options, 1);
         } finally {
           calloc.free(options);
         }
