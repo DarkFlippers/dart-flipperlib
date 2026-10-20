@@ -55,17 +55,25 @@ const String missingCharacteristicsMessage =
 /// sentence for every shape of this failure, and the field is here so that
 /// the next reader of it does not have to re-parse the message.
 ///
-/// It is deliberately *not* claimed that the list separates the two causes.
-/// It cannot, twice over. The entries are pre-rendered `name(uuid)` strings,
-/// so telling `rpcStatus` alone from the rest means matching text again -
-/// the regex moved out of [classifyConnectError] and into the caller. And
-/// `missing.length == 4` is ambiguous at the throw site: in `link.dart` the
-/// four nulls arise both when no service matched the Flipper UUID at all and
-/// when one matched without the characteristics. All four gone is *usually*
-/// a stale Android service cache and `rpcStatus` alone *usually* old
-/// firmware, but neither is decidable from this field. Typing the entries
-/// and carrying service-presence from the throw site is what would make them
-/// so, and is a task of its own.
+/// It is deliberately *not* claimed that the list separates the causes. The
+/// entries are pre-rendered `name(uuid)` strings, so telling one from another
+/// means matching text again - the regex moved out of
+/// [classifyConnectError] and into the caller. And the count is ambiguous at
+/// the throw site: in `link.dart` the nulls arise both when no service
+/// matched the Flipper UUID at all and when one matched without the
+/// characteristics. All of them gone is *usually* a stale Android service
+/// cache, but that is not decidable from this field. Typing the entries and
+/// carrying service-presence from the throw site is what would make it so,
+/// and is a task of its own.
+///
+/// `rpcStatus` is no longer among them, and the reason is worth keeping here
+/// rather than only at the throw site: it used to be, and QUNLEASHED-14 was a
+/// Flipper that had the other three and not it. That is old firmware, which no
+/// sentence this error can produce would have helped with - and it did not
+/// need one, because `link.dart` already degrades to ungated TX when the
+/// characteristic cannot be subscribed. It is now simply not required. So a
+/// list of three is the most this can carry, and `tx`/`rx` in it mean the
+/// transport itself is absent.
 ///
 /// The message still reads as [missingCharacteristicsMessage] and the needle
 /// in [classifyConnectError] still matches it, so a plain `StateError`
@@ -81,7 +89,7 @@ base class FlipperServicesMissingError extends StateError {
       missing = List.unmodifiable(missing),
       super('$missingCharacteristicsMessage: ${missing.join(', ')}');
 
-  /// What was absent, each as `tx(uuid)` or `rpcStatus(uuid)`.
+  /// What was absent, each as `tx(uuid)` or `overflow(uuid)`.
   final List<String> missing;
 }
 
