@@ -138,7 +138,12 @@ abstract class UniversalBleTransportBase extends Transport {
 
   late String _rxCharIdLower;
   late String _overflowCharIdLower;
-  late String _rpcStatusCharIdLower;
+
+  /// Null when the device has no `rpcStatus` characteristic, which is allowed
+  /// - see the `missing` list in [configureConnected]. Nullable rather than
+  /// `late` because the dispatch below compares against it on every
+  /// notification, and a `late` field read before assignment throws.
+  String? _rpcStatusCharIdLower;
 
   final List<BlePendingSend> _txQueue = [];
   Completer<void>? _txDataSignal;
@@ -433,13 +438,24 @@ abstract class UniversalBleTransportBase extends Transport {
       }
     }
 
+    // `rpcStatus` is deliberately not in here. It is the one characteristic
+    // this link already knows how to work without: [_subscribeRpcStatus]
+    // catches a failed subscribe, clears [_rpcStatusAvailable] and falls back
+    // to ungated TX, and the only thing that reads the flag is one hold in the
+    // pump. Requiring it here meant the same condition was survivable when the
+    // subscribe failed and fatal when the characteristic was absent - and the
+    // fatal arm is the one a real Flipper reached, six times in under two
+    // minutes while auto-reconnect retried it (QUNLEASHED-14, where
+    // `rpcStatus` alone was missing and the other three resolved).
+    //
+    // tx and rx are the transport; there is nothing to degrade to without
+    // them. `overflow` stays required because three sites dereference it with
+    // `!` - making it optional too is a separate change, not a comment.
     final missing = <String>[
       if (txSvc == null || txChar == null) 'tx($flipperBleTxUuid)',
       if (rxSvc == null || rxChar == null) 'rx($flipperBleRxUuid)',
       if (overflowSvc == null || overflowChar == null)
         'overflow($overflowCharUuid)',
-      if (rpcStatusSvc == null || rpcStatusChar == null)
-        'rpcStatus($rpcStatusCharUuid)',
     ];
     if (missing.isNotEmpty) {
       // Typed rather than a bare `StateError` carrying a sentence:
@@ -472,7 +488,7 @@ abstract class UniversalBleTransportBase extends Transport {
     _rpcStatusCharId = rpcStatusChar;
     _rxCharIdLower = _rxCharId.toLowerCase();
     _overflowCharIdLower = _overflowCharId!.toLowerCase();
-    _rpcStatusCharIdLower = _rpcStatusCharId!.toLowerCase();
+    _rpcStatusCharIdLower = _rpcStatusCharId?.toLowerCase();
     Log.info(
       '[BLE] configured: negotiatedMtu=$_negotiatedMtu mtu=$bleMtuSize '
       'txWithResponse=$_txWithResponse',
@@ -662,19 +678,21 @@ abstract class UniversalBleTransportBase extends Transport {
   // which later trips ERROR_DECODE and makes the firmware reset its BLE stack
   // (seen as a PEER-INITIATED drop minutes in). rpcStatus is a plain status read
   // with no such side effect.
-  Future<void> _openEncryptedSetup(String deviceId) async {
-    // 1. Pair / establish encryption via a side-effect-free encrypted read.
-    final rpcSvc = _rpcStatusSvcId;
-    final rpcChr = _rpcStatusCharId;
-    if (rpcSvc != null && rpcChr != null) {
-      await _runPairingSensitive(
-        () => _ops.read(deviceId, rpcSvc, rpcChr, timeout: _pairingOpTimeout),
-      );
-    } else {
-      // rpcStatus is a required characteristic (see configureConnected), so
-      // this fallback should be unreachable; pair via overflow only if it is
-      // somehow absent.
-      await _runPairingSensitive(
+  //
+  // On a device that has no rpcStatus characteristic the pairing read has to be
+  // the overflow one, and then it is the session's single read and step 4
+  // reuses its value. "Exactly once" is the invariant; which step performs it
+  // is not.
+  /// The session's single overflow read. See this method's header for why
+  /// there is only one: the read returns the stored credit rather than a fresh
+  /// grant, and a second desyncs the firmware's flow-control counter.
+  ///
+  /// One body with two mutually exclusive callers below, rather than the same
+  /// six lines written out at both - they are the two halves of one invariant,
+  /// so they are exactly the pair that must not drift.
+  /// `ble_overflow_single_read_test.dart` counts the calls.
+  Future<Uint8List> _readOverflowCredit(String deviceId) =>
+      _runPairingSensitive(
         () => _ops.read(
           deviceId,
           _overflowSvcId!,
@@ -682,6 +700,32 @@ abstract class UniversalBleTransportBase extends Transport {
           timeout: _pairingOpTimeout,
         ),
       );
+
+  Future<void> _openEncryptedSetup(String deviceId) async {
+    // 1. Pair / establish encryption via a side-effect-free encrypted read.
+    final rpcSvc = _rpcStatusSvcId;
+    final rpcChr = _rpcStatusCharId;
+    // A local boolean, so Dart promotes both locals inside the branch below -
+    // the hoist costs no `!` and the two arms key off one expression rather
+    // than deriving the same fact twice.
+    final hasRpcStatus = rpcSvc != null && rpcChr != null;
+
+    if (hasRpcStatus) {
+      await _runPairingSensitive(
+        () => _ops.read(deviceId, rpcSvc, rpcChr, timeout: _pairingOpTimeout),
+      );
+    } else {
+      // A device with no rpcStatus characteristic, which `configureConnected`
+      // now accepts: old firmware carrying the other three (QUNLEASHED-14).
+      // This arm was written as unreachable while rpcStatus was required.
+      //
+      // Both rules in the header still hold and neither is restated here: the
+      // pairing read cannot wait for the subscribes, and overflow is the only
+      // readable characteristic left - so this *is* the session's one overflow
+      // read, and step 4 does not take another. Applied here rather than
+      // carried to step 4, so that a credit notification arriving during the
+      // subscribes below is not overwritten by this older value.
+      _applyOverflowValue(await _readOverflowCredit(deviceId));
     }
 
     // 2. RX notifications, now on the encrypted link.
@@ -715,16 +759,13 @@ abstract class UniversalBleTransportBase extends Transport {
       ),
     );
 
-    // 4. Authoritative initial credit — the ONLY overflow read of the session.
-    final initialBudget = await _runPairingSensitive(
-      () => _ops.read(
-        deviceId,
-        _overflowSvcId!,
-        _overflowCharId!,
-        timeout: _pairingOpTimeout,
-      ),
-    );
-    _applyOverflowValue(initialBudget);
+    // 4. Authoritative initial credit, after the subscribes so nothing is
+    //    missed between the read and the notifications - and the session's
+    //    only overflow read on this path. The no-rpcStatus arm above has
+    //    already taken it.
+    if (hasRpcStatus) {
+      _applyOverflowValue(await _readOverflowCredit(deviceId));
+    }
 
     // A fresh connection resets the firmware RPC buffer and grants the full
     // 1024-byte credit. If the read above raced ahead of that grant and saw 0,
@@ -817,7 +858,20 @@ abstract class UniversalBleTransportBase extends Transport {
   Future<void> _subscribeRpcStatus(String deviceId) async {
     final svc = _rpcStatusSvcId;
     final chr = _rpcStatusCharId;
-    if (svc == null || chr == null) return;
+    if (svc == null || chr == null) {
+      // Reachable on a real device now that the characteristic is optional,
+      // and worth a line: it is the explanation for TX running ungated on this
+      // link, which is what somebody would be looking for if throughput or a
+      // stall ever needed diagnosing. `warn` and not `info` because the app
+      // pins this library at `LogService._keptFrom`, which is `warning` - an
+      // `info` would not survive a release build. Once per link setup, so
+      // there is nothing to latch.
+      Log.warn(
+        '[BLE] no rpcStatus characteristic on this device; '
+        'TX gating disabled',
+      );
+      return;
+    }
     try {
       await _ops
           .subscribeNotifications(deviceId, svc, chr)

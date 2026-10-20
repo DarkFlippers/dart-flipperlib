@@ -55,17 +55,25 @@ const String missingCharacteristicsMessage =
 /// sentence for every shape of this failure, and the field is here so that
 /// the next reader of it does not have to re-parse the message.
 ///
-/// It is deliberately *not* claimed that the list separates the two causes.
-/// It cannot, twice over. The entries are pre-rendered `name(uuid)` strings,
-/// so telling `rpcStatus` alone from the rest means matching text again -
-/// the regex moved out of [classifyConnectError] and into the caller. And
-/// `missing.length == 4` is ambiguous at the throw site: in `link.dart` the
-/// four nulls arise both when no service matched the Flipper UUID at all and
-/// when one matched without the characteristics. All four gone is *usually*
-/// a stale Android service cache and `rpcStatus` alone *usually* old
-/// firmware, but neither is decidable from this field. Typing the entries
-/// and carrying service-presence from the throw site is what would make them
-/// so, and is a task of its own.
+/// It is deliberately *not* claimed that the list separates the causes. The
+/// entries are pre-rendered `name(uuid)` strings, so telling one from another
+/// means matching text again - the regex moved out of
+/// [classifyConnectError] and into the caller. And the count is ambiguous at
+/// the throw site: in `link.dart` the nulls arise both when no service
+/// matched the Flipper UUID at all and when one matched without the
+/// characteristics. All of them gone is *usually* a stale Android service
+/// cache, but that is not decidable from this field. Typing the entries and
+/// carrying service-presence from the throw site is what would make it so,
+/// and is a task of its own.
+///
+/// `rpcStatus` is no longer among them, and the reason is worth keeping here
+/// rather than only at the throw site: it used to be, and QUNLEASHED-14 was a
+/// Flipper that had the other three and not it. That is old firmware, which no
+/// sentence this error can produce would have helped with - and it did not
+/// need one, because `link.dart` already degrades to ungated TX when the
+/// characteristic cannot be subscribed. It is now simply not required. So a
+/// list of three is the most this can carry, and `tx`/`rx` in it mean the
+/// transport itself is absent.
 ///
 /// The message still reads as [missingCharacteristicsMessage] and the needle
 /// in [classifyConnectError] still matches it, so a plain `StateError`
@@ -81,7 +89,7 @@ base class FlipperServicesMissingError extends StateError {
       missing = List.unmodifiable(missing),
       super('$missingCharacteristicsMessage: ${missing.join(', ')}');
 
-  /// What was absent, each as `tx(uuid)` or `rpcStatus(uuid)`.
+  /// What was absent, each as `tx(uuid)` or `overflow(uuid)`.
   final List<String> missing;
 }
 
@@ -320,23 +328,10 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
     // QUNLEASHED-V holds both codes, over three users, and was most of the
     // unclassified reports on 0.17.0's first day.
     //
-    // Each code is spelled with the word before it, and twice, because the
-    // bare number is four characters of a MAC, a timeout in milliseconds or a
-    // firmware build. `universal_ble` stringifies the status as `Unknown Error
-    // 133`; a `PlatformException` carries it as `status 133`. `gatt_error` is
-    // the symbolic form, which no event here has produced - it is in the list
-    // on the same footing as `devicenotfound` and the rest of this block's
-    // platform vocabulary, not on the strength of a report.
+    // The numeric GATT status codes are read by [_namesGattUnreachable]
+    // below, not spelled here: the word, and then the whole number, and then
+    // the number has to be one we mean.
     //
-    // A substring match and not a prefix one, so `error 1337` lands here too,
-    // and so would the sequence buried in a longer blob. Left unanchored:
-    // `contains` is the whole vocabulary of this function, and an
-    // unrecognised numeric GATT code shown the range dialog is a better wrong
-    // answer than the generic one, which says nothing at all.
-    'error 133',
-    'status 133',
-    'error 147',
-    'status 147',
     'gatt_error',
     // The handle the stack is holding no longer names anything, which is what
     // a read finds after the link went away under it rather than a condition
@@ -347,5 +342,51 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
     return FlipperConnectErrorKind.deviceUnreachable;
   }
 
+  if (_namesGattUnreachable(e)) {
+    return FlipperConnectErrorKind.deviceUnreachable;
+  }
+
   return FlipperConnectErrorKind.unknown;
 }
+
+/// Android GATT status codes that mean the device is not reachable.
+///
+/// 133 is `GATT_ERROR` (0x85), the stack's catch-all: out of range, not
+/// advertising, the stack out of GATT clients. 147 is not in Android's
+/// published list and arrived from a vendor ROM behaving the same way - which
+/// handset is not recoverable, because those events carry no `device.family`.
+/// QUNLEASHED-V holds both, over three users.
+///
+/// A set and not "any number", which is the whole lesson of this predicate's
+/// two previous shapes. Matching any qualified number classified every Apple
+/// BLE failure, because `universal_ble` forwards
+/// `details: String(nsError.code)` for all of them
+/// (`UniversalBleHelper.swift`, `createFlutterError`) - so
+/// `Connection limit reached., Details: 11` became "move your Flipper closer"
+/// and `_reportUnknownConnect` went empty for iOS and macOS. A code that is
+/// not in here is better left `unknown`: that is what the reporter collects,
+/// and collecting it is how 133 and 147 got here in the first place.
+const Set<int> _gattUnreachableStatuses = {133, 147};
+
+/// The qualifier a GATT status arrives behind, and the whole number after it.
+///
+/// Three spellings reached this function from the field - `Unknown Error 133`
+/// from `universal_ble`, `status 133` from a `PlatformException`
+/// (QUNLEASHED-V), and `Failed to read, Details: 133` from the Android plugin
+/// (QUNLEASHED-13) - and a literal per spelling was the shape before this.
+/// Three literals is not the cost; being a `contains` is: `details: 133`
+/// matches `Details: 1337` and `Details: 1472` by prefix, so the literals were
+/// *wider* than reading the number, not narrower. Measured, both ways.
+///
+/// `[\s:=]*` because the three differ only in punctuation, which is a
+/// plugin's formatting. `allMatches` because a message can carry two numbers
+/// and only the second be the status.
+final RegExp _gattStatus = RegExp(r'(?:error|status|details)[\s:=]*(\d{1,5})');
+
+/// Whether [lowercased] names a GATT status this kind is for.
+///
+/// Private, and exercised through [classifyConnectError] like every other
+/// needle here - this file has no imports and no `@visibleForTesting`.
+bool _namesGattUnreachable(String lowercased) => _gattStatus
+    .allMatches(lowercased)
+    .any((m) => _gattUnreachableStatuses.contains(int.parse(m.group(1)!)));

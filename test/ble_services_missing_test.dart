@@ -15,21 +15,13 @@
 // old firmware. Both produce the same type; only the length of `missing`
 // differs, and these cases are what make that observable.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:universal_ble/universal_ble.dart' as uble;
 
 import 'package:flipperlib/src/model/connect_error.dart';
-import 'package:flipperlib/src/model/discovered.dart';
 import 'package:flipperlib/src/transport/ble/gatt.dart';
 import 'package:flipperlib/src/transport/ble/link.dart';
 import 'package:flipperlib/src/transport/ble/ops.dart';
 
-BleChar _char(String uuid) => BleChar(
-  uuid,
-  canWrite: true,
-  canWriteNoRsp: true,
-  canNotify: true,
-  canIndicate: false,
-);
+import 'ble_fixtures.dart';
 
 /// Answers discovery with whatever it was handed, and nothing else.
 class _FakeOps implements BleOps {
@@ -50,22 +42,7 @@ class _FakeOps implements BleOps {
 }
 
 UniversalBleTransportBase _transport(List<BleService> services) =>
-    _TestTransport(
-      BleDiscoveredDevice(uble.BleDevice(deviceId: 'dev', name: 'Flipper')),
-      _FakeOps(services),
-    );
-
-class _TestTransport extends UniversalBleTransportBase {
-  _TestTransport(super.device, super.ops);
-}
-
-/// Every characteristic a Flipper carries, so a case can drop exactly one.
-List<BleChar> _allChars() => [
-  _char(flipperBleTxUuid),
-  _char(flipperBleRxUuid),
-  _char(UniversalBleTransportBase.overflowCharUuid),
-  _char(UniversalBleTransportBase.rpcStatusCharUuid),
-];
+    TestBleTransport(testFlipperDevice(), _FakeOps(services));
 
 Future<FlipperServicesMissingError> _thrownBy(List<BleService> services) async {
   try {
@@ -78,13 +55,16 @@ Future<FlipperServicesMissingError> _thrownBy(List<BleService> services) async {
 
 void main() {
   group('a service list with no Flipper service', () {
-    test('is refused with all four named', () async {
+    test('is refused with the three required ones named', () async {
       // The stale-cache shape: Android answers discovery with a list that
       // does not contain the Flipper service at all, so the loop matches
       // nothing and every characteristic reads as absent.
+      //
+      // Three and not four: `rpcStatus` is absent here too, and is no longer
+      // required - see the group at the bottom.
       final error = await _thrownBy([]);
 
-      expect(error.missing, hasLength(4));
+      expect(error.missing, hasLength(3));
     });
 
     test('and names them as the classifier test spells them', () async {
@@ -97,7 +77,6 @@ void main() {
         'tx($flipperBleTxUuid)',
         'rx($flipperBleRxUuid)',
         'overflow(${UniversalBleTransportBase.overflowCharUuid})',
-        'rpcStatus(${UniversalBleTransportBase.rpcStatusCharUuid})',
       ]);
     });
 
@@ -116,11 +95,11 @@ void main() {
     test('and a list of somebody else-s services reads the same', () async {
       final error = await _thrownBy([
         BleService('0000180a-0000-1000-8000-00805f9b34fb', [
-          _char('00002a29-0000-1000-8000-00805f9b34fb'),
+          flipperChar('00002a29-0000-1000-8000-00805f9b34fb'),
         ]),
       ]);
 
-      expect(error.missing, hasLength(4));
+      expect(error.missing, hasLength(3));
     });
   });
 
@@ -129,7 +108,7 @@ void main() {
       // Old firmware without the overflow channel, which is the other cause
       // the docs on this error distinguish - and the case that shows the two
       // are told apart by the length of `missing` and nothing else.
-      final chars = _allChars()
+      final chars = allFlipperChars()
         ..removeWhere(
           (c) => c.uuid == UniversalBleTransportBase.overflowCharUuid,
         );
@@ -141,7 +120,8 @@ void main() {
     });
 
     test('and still carries a message that classifies untyped', () async {
-      final chars = _allChars()..removeWhere((c) => c.uuid == flipperBleRxUuid);
+      final chars = allFlipperChars()
+        ..removeWhere((c) => c.uuid == flipperBleRxUuid);
       final error = await _thrownBy([BleService(flipperBleServiceUuid, chars)]);
 
       // Through the string arm rather than the type, which is what an older
@@ -153,11 +133,53 @@ void main() {
     });
   });
 
+  group('a Flipper service with no rpcStatus characteristic', () {
+    // QUNLEASHED-14: a real Flipper answered discovery with tx, rx and
+    // overflow and no rpcStatus - old firmware - and the link refused it. Six
+    // events in under two minutes, because auto-reconnect kept trying.
+    //
+    // Refusing was the inconsistency: `_subscribeRpcStatus` already catches a
+    // failed subscribe, clears `_rpcStatusAvailable` and falls back to ungated
+    // TX, so the same condition was survivable when the subscribe failed and
+    // fatal when the characteristic was absent.
+    List<BleService> withoutRpcStatus() => [
+      BleService(
+        flipperBleServiceUuid,
+        allFlipperChars()..removeWhere(
+          (c) => c.uuid == UniversalBleTransportBase.rpcStatusCharUuid,
+        ),
+      ),
+    ];
+
+    test('is accepted', () async {
+      // The whole of the fix. Before it, this threw.
+      await expectLater(
+        _transport(withoutRpcStatus()).configureConnected('dev'),
+        completes,
+      );
+    });
+
+    test('and is still refused when a required one is missing too', () async {
+      // So the case above cannot pass by `configureConnected` having stopped
+      // refusing anything at all.
+      final chars = allFlipperChars()
+        ..removeWhere(
+          (c) =>
+              c.uuid == UniversalBleTransportBase.rpcStatusCharUuid ||
+              c.uuid == flipperBleRxUuid,
+        );
+      final error = await _thrownBy([BleService(flipperBleServiceUuid, chars)]);
+
+      // Names the required one and not the optional one.
+      expect(error.missing, ['rx($flipperBleRxUuid)']);
+    });
+  });
+
   test('a complete Flipper service is accepted', () async {
     // The precondition the six cases above rest on: this harness can produce
     // a list that does *not* throw. Without it they would all pass against a
     // `configureConnected` that refused everything.
-    await _transport([BleService(flipperBleServiceUuid, _allChars())])
+    await _transport([BleService(flipperBleServiceUuid, allFlipperChars())])
         .configureConnected('dev');
   });
 }

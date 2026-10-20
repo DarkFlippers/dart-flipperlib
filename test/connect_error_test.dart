@@ -310,12 +310,75 @@ void main() {
       // QUNLEASHED-T, during an automatic reconnect.
       'UniversalBleException: Code: UniversalBleErrorCode.invalidHandle, '
           'Message: Failed to read, Details: 1',
+      // QUNLEASHED-13, and the third spelling of the same number. The first
+      // two were met with a needle each; this one matched neither and showed
+      // the generic dialog to somebody whose Flipper was out of range. It is
+      // what the code is read rather than enumerated for.
+      'UniversalBleException: Code: UniversalBleErrorCode.unknownError, '
+          'Message: Failed to read, Details: 133',
     ]) {
       test('is read from "$message"', () {
         expect(
           classifyConnectError(message),
           FlipperConnectErrorKind.deviceUnreachable,
         );
+      });
+    }
+
+    // Apple forwards `details: String(nsError.code)` for every error
+    // `universal_ble` hands up (`UniversalBleHelper.swift`,
+    // `createFlutterError`), so a bare number there is any failure at all.
+    // These two are real reports, and they are why the status is checked
+    // against a set rather than matched as "a number after a qualifier" -
+    // which is a shape this predicate had, briefly.
+    //
+    // Asserted as `unknown` and not merely "not deviceUnreachable": the
+    // weaker form passes against a `classifyConnectError` that answers
+    // `unknown` for everything, and `unknown` is also the *point* - it is
+    // what `_reportUnknownConnect` collects, which is how 133 and 147 were
+    // learned.
+    for (final message in const [
+      'UniversalBleException: Code: UniversalBleErrorCode.unknownError, '
+          'Message: Connection limit reached., Details: 11',
+      'UniversalBleException: Code: UniversalBleErrorCode.unknownError, '
+          'Message: The operation was cancelled., Details: 5',
+    ]) {
+      test('an Apple error code is not a GATT status: "$message"', () {
+        expect(classifyConnectError(message), FlipperConnectErrorKind.unknown);
+      });
+    }
+
+    // A word that is not a GATT-status qualifier, or a number that is not a
+    // GATT status. The first three carry a qualifier with the wrong number -
+    // `WinError` has no left word boundary, bluez's `ATT error: 0x0e` puts
+    // digits behind a hex prefix, and `libusb error 4` is the positive form of
+    // a libusb code. The rest carry a number with no qualifier at all: `133`
+    // alone is four characters of a MAC, and `code` is the desktop serial
+    // open's word.
+    //
+    // `HTTP Error 404: Not Found` is deliberately absent. It does classify as
+    // `deviceUnreachable`, through the `not found` needle that predates all of
+    // this - and no connect path produces it, so asserting it here would be
+    // asserting somebody else's decision about a string this function is never
+    // handed.
+    for (final message in const [
+      'StateError: CM_Get_Parent failed, WinError 1168',
+      'UniversalBleException: Code: UniversalBleErrorCode.failed, '
+          'Message: Operation failed with ATT error: 0x0e, Details: 14',
+      'libusb error 4',
+      // A longer number starting with a status we do mean. The literals this
+      // replaced were `contains`, so they matched these by prefix - the
+      // membership set is what makes the whole number count. Measured both
+      // ways before the change.
+      'UniversalBleException: Message: Failed to read, Details: 1337',
+      'PlatformException(gatt, status 1472)',
+      'PlatformException(connect, device 133 is not reachable by name)',
+      'Failed to open /dev/ttyACM0: Permission denied (code 13)',
+      'USB permission denied or port unavailable',
+      'connect to 80:E1:27:00:13:30 failed',
+    ]) {
+      test('is not read from "$message"', () {
+        expect(classifyConnectError(message), FlipperConnectErrorKind.unknown);
       });
     }
 
