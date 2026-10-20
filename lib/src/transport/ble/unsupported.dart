@@ -1,3 +1,5 @@
+import 'package:universal_ble/universal_ble.dart' as uble;
+
 import '../../model/discovered.dart';
 import '../transport.dart';
 import 'platform.dart';
@@ -17,6 +19,13 @@ class UnsupportedBlePlatform extends UniversalBlePlatformBase {
 
   @override
   Future<BleAccess> readAccess() async => BleAccess.unsupported;
+
+  // Same reason, one layer down: `FlipperClient` asks this before a scan, and
+  // the inherited body would reach for a plugin that has no implementation
+  // registered on a platform that got here.
+  @override
+  Future<uble.AvailabilityState> availabilityState() async =>
+      uble.AvailabilityState.unsupported;
 
   @override
   bool includeDevice(BleDiscoveredDevice device) => false;

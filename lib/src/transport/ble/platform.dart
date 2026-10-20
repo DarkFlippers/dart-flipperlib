@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/foundation.dart' show protected;
 import 'package:universal_ble/universal_ble.dart' as uble;
 
 import '../../common/log.dart';
@@ -63,6 +63,37 @@ abstract class BlePlatform {
   /// would re-raise a prompt the user already answered.
   Future<BleAccess> readAccess();
 
+  /// The plugin's own answer about the radio, unmapped.
+  ///
+  /// On the interface rather than private to the base class because it is the
+  /// only place this process calls `getBluetoothAvailabilityState`. Two
+  /// callers in `FlipperClient` used to call it directly, and on Linux that
+  /// call is how the app died: the plugin's bluez backend initialises on first
+  /// use, and when that fails it completes its own initialisation completer
+  /// with an error nothing is listening to yet. An orphaned rejection is not
+  /// catchable at a call site — it goes to the root zone, which is
+  /// `PlatformDispatcher.onError`, which is a fatal crash report
+  /// (QUNLEASHED-Q, QUNLEASHED-C). So the fix has to be to not make the call,
+  /// and that is only possible if there is one place making it.
+  ///
+  /// The narrow claim is the one that matters and the one to keep true: this
+  /// is not the only `UniversalBle` call in the process — there are two dozen
+  /// — and it is not even the only adapter read. `FlipperClient` also listens
+  /// to `UniversalBle.availabilityStream`, and that subscription **does**
+  /// reach `_ensureInitialized`: the backend's controller is a
+  /// `UniversalBleStreamController` whose `onListen` awaits
+  /// `getBluetoothAvailabilityState`, and its `catch (_) {}` swallows the
+  /// rethrow but not the orphaned completer. So it is safe only by position —
+  /// `_awaitBleAvailable` returns on `poweredOn` and on `unsupported` before
+  /// it ever subscribes. That ordering is the load-bearing fact, and
+  /// `plugin_reach_guard_test.dart` is where it is held, because a
+  /// prohibition documented on the thing you *are* allowed to call is the
+  /// weakest possible placement.
+  ///
+  /// Callers want [readAccess]. This is for the two of them that need the
+  /// platform's word before deciding whether to scan at all.
+  Future<uble.AvailabilityState> availabilityState();
+
   // Already-bonded / system-known devices: an instant lookup (not a scan),
   // queried once at the start of every scan to surface devices that are
   // connected but not currently advertising.
@@ -115,13 +146,27 @@ abstract class UniversalBlePlatformBase implements BlePlatform {
     return readAccess();
   }
 
-  /// The one plugin call [readAccess] makes.
+  /// Policy, not the plugin call: this body makes none, and
+  /// [askPluginForAvailability] below is the line that does.
   ///
-  /// Its own method so a test can stand in for the platform without
-  /// reimplementing [readAccess] or the mapping below — the two things that
-  /// actually have to be right.
-  @visibleForTesting
+  /// Two methods of one signature is a trap, so the rule is — override **this**
+  /// to change the *answer* (`LinuxBlePlatform` does), and stand in for
+  /// [askPluginForAvailability] to change *where the answer comes from* (its
+  /// test does). `ble_access_test.dart` and `ble_access_android_test.dart`
+  /// stub the plugin method for the same reason.
+  @override
   Future<uble.AvailabilityState> availabilityState() {
+    return askPluginForAvailability();
+  }
+
+  /// The line that touches universal_ble, split out from [availabilityState]
+  /// because a platform that overrides the latter has to be able to delegate
+  /// to the plugin *and* be tested without one. `super.availabilityState()` is
+  /// statically bound, so there is no dispatch point for a test subclass to
+  /// intercept; this has one. `LinuxBlePlatform` is the override that still
+  /// delegates, and `ble_access_linux_test.dart` is the test.
+  @protected
+  Future<uble.AvailabilityState> askPluginForAvailability() {
     return uble.UniversalBle.getBluetoothAvailabilityState();
   }
 
