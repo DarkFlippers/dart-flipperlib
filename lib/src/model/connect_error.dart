@@ -186,6 +186,42 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
     'not found',
     'disconnected',
     'session setup',
+    // Android's GATT status codes, which carry no words of their own beyond
+    // whatever the plugin wrapped them in.
+    //
+    // 133 is `GATT_ERROR` (0x85), the stack's catch-all: out of range, not
+    // advertising, the stack out of GATT clients. 147 is not in Android's
+    // published list and arrived from a vendor ROM behaving the same way -
+    // which handset is not recoverable, because those events carry no
+    // `device.family`. Both reached `unknown` and showed the generic
+    // "connection failed" to people whose Flipper was simply not in range -
+    // the same miss as qUnleashed#363 arriving by a different road.
+    // QUNLEASHED-V holds both codes, over three users, and was most of the
+    // unclassified reports on 0.17.0's first day.
+    //
+    // Each code is spelled with the word before it, and twice, because the
+    // bare number is four characters of a MAC, a timeout in milliseconds or a
+    // firmware build. `universal_ble` stringifies the status as `Unknown Error
+    // 133`; a `PlatformException` carries it as `status 133`. `gatt_error` is
+    // the symbolic form, which no event here has produced - it is in the list
+    // on the same footing as `devicenotfound` and the rest of this block's
+    // platform vocabulary, not on the strength of a report.
+    //
+    // A substring match and not a prefix one, so `error 1337` lands here too,
+    // and so would the sequence buried in a longer blob. Left unanchored:
+    // `contains` is the whole vocabulary of this function, and an
+    // unrecognised numeric GATT code shown the range dialog is a better wrong
+    // answer than the generic one, which says nothing at all.
+    'error 133',
+    'status 133',
+    'error 147',
+    'status 147',
+    'gatt_error',
+    // The handle the stack is holding no longer names anything, which is what
+    // a read finds after the link went away under it rather than a condition
+    // of its own - so it belongs with being out of range and not in its own
+    // bucket. Seen during an automatic reconnect. QUNLEASHED-T.
+    'invalidhandle',
   ])) {
     return FlipperConnectErrorKind.deviceUnreachable;
   }

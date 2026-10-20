@@ -165,6 +165,91 @@ void main() {
     }
   });
 
+  // The strings Sentry received on 0.17.0's first day, as it received them.
+  //
+  // qUnleashed's `_reportUnknownConnect` raises one issue per unclassified
+  // string, which makes that list this function's to-do list - and these
+  // three were the whole of it. Spelled out whole rather than trimmed to the
+  // needle, so the case asserts that the field data classifies and not that
+  // the needle matches itself: a needle tested against the message it was cut
+  // from passes whatever the surrounding format does next.
+  group('a numeric GATT status', () {
+    for (final message in const [
+      // QUNLEASHED-V, which holds both codes, over three users.
+      // `universal_ble`'s own wording, with the status repeated in `Details`.
+      'UniversalBleException: Code: UniversalBleErrorCode.unknownError, '
+          'Message: Unknown Error 133, Details: Unknown Error 133',
+      'UniversalBleException: Code: UniversalBleErrorCode.unknownError, '
+          'Message: Unknown Error 147, Details: Unknown Error 147',
+      // QUNLEASHED-T, during an automatic reconnect.
+      'UniversalBleException: Code: UniversalBleErrorCode.invalidHandle, '
+          'Message: Failed to read, Details: 1',
+    ]) {
+      test('is read from "$message"', () {
+        expect(
+          classifyConnectError(message),
+          FlipperConnectErrorKind.deviceUnreachable,
+        );
+      });
+    }
+
+    // The shapes no event here has produced, kept in their own loop so the
+    // header above stays true of the three that did. A plugin that lets the
+    // `PlatformException` through rather than wrapping it writes the status
+    // this way; `status 147` and `gatt_error` are in the needle list by
+    // symmetry with their neighbours, which means nothing reaches them unless
+    // a case does - a mutation over that list would otherwise show both
+    // surviving.
+    //
+    // Each needle sits inside a longer sentence rather than alone, because a
+    // case whose whole content is the needle asserts only that `contains`
+    // works.
+    for (final message in const [
+      'PlatformException(gatt, status 133)',
+      'PlatformException(gatt, status 147)',
+      'android.bluetooth: GATT_ERROR while connecting',
+    ]) {
+      test('is read from the unobserved shape "$message"', () {
+        expect(
+          classifyConnectError(message),
+          FlipperConnectErrorKind.deviceUnreachable,
+        );
+      });
+    }
+
+    // The one unclassified string on that list that is *meant* to stay
+    // unclassified, and the reason this case exists: it looks like the four
+    // above and is nothing like them. `java.lang.NullPointerException` from
+    // inside `universal_ble`'s Android plugin is the plugin falling over, not
+    // a fact about the link - so telling somebody their Flipper is out of
+    // range would be an invention. `unknown` is the right answer here, and
+    // this pins it against the next pass through this list.
+    //
+    // QUNLEASHED-X and QUNLEASHED-W are that string; it was two issues rather
+    // than one because the message carries a Java stack trace whose line
+    // numbers differ per ROM, which is a fingerprint problem in the app and
+    // not a classification one.
+    test('and a plugin falling over is not one', () {
+      // Newline-separated and tab-indented, which is how the event carries
+      // it - the plugin concatenates `Log.getStackTraceString` whole. The
+      // frame list is trimmed; nothing else about the shape is. It makes no
+      // difference to this function, which lowercases and looks for
+      // substrings, but a flattened copy here would disagree with the
+      // fixture the app's own fingerprint case needs, and the two are the
+      // same event.
+      expect(
+        classifyConnectError(
+          'UniversalBleException: Code: UniversalBleErrorCode.unknownError, '
+          'Message: java.lang.NullPointerException, Details: Cause: null, '
+          'Stacktrace: java.lang.NullPointerException\n'
+          '\tat a2.F0.c(Unknown Source:127)\n'
+          '\tat android.os.Handler.handleCallback(Handler.java:938)\n',
+        ),
+        FlipperConnectErrorKind.unknown,
+      );
+    });
+  });
+
   // A caller that awaits `connect` and then switches the session to RPC -
   // which is what opening a link is - fails with one of these when the link
   // dies in the gap between the two. Not something a BLE stack said: this
