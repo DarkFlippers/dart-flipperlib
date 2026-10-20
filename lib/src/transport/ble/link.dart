@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../../common/log.dart';
+import '../../model/connect_error.dart';
 import '../../model/discovered.dart';
 import '../../model/enums.dart';
 import '../../model/exceptions.dart';
@@ -441,9 +442,10 @@ abstract class UniversalBleTransportBase extends Transport {
         'rpcStatus($rpcStatusCharUuid)',
     ];
     if (missing.isNotEmpty) {
-      throw StateError(
-        'Missing Flipper BLE characteristics: ${missing.join(', ')}',
-      );
+      // Typed rather than a bare `StateError` carrying a sentence:
+      // `classifyConnectError` reads the type, and `missing` is a fact a
+      // caller can act on without parsing it back out of the message.
+      throw FlipperServicesMissingError(missing);
     }
 
     _txSvcId = txSvc!;

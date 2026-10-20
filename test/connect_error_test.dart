@@ -11,6 +11,22 @@ import 'package:flutter_test/flutter_test.dart';
 ///
 /// The app shows a different dialog per kind, so a misclassification is a user
 /// being told to turn Bluetooth on when their bond is stale.
+/// A services-missing error whose sentence says nothing about the failure.
+///
+/// The type arm in `classifyConnectError` is otherwise untestable: the real
+/// constructor interpolates `missingCharacteristicsMessage` into the message,
+/// so the needle two blocks down catches every genuine instance and deleting
+/// the type check changes nothing a case can see. Masking `toString` is what
+/// separates the two arms - this reaches `servicesMissing` only by its type.
+///
+/// `final` because the base is `base`, which requires it.
+final class _MaskedServicesMissing extends FlipperServicesMissingError {
+  _MaskedServicesMissing() : super(const ['tx(abc)']);
+
+  @override
+  String toString() => 'nothing about services at all';
+}
+
 void main() {
   group('a stale bond', () {
     // These come from Android GATT and CoreBluetooth respectively. Both also
@@ -129,6 +145,116 @@ void main() {
     }
   });
 
+  // QUNLEASHED-Z, on a Sony Xperia XZ3 running Android 10 with both location
+  // permissions revoked. A scan below Android 12 needs `ACCESS_FINE_LOCATION`,
+  // and the refusal arrives naming the permission rather than Bluetooth - so
+  // it matched nothing and a user who had revoked a permission was told to
+  // toggle Bluetooth off and on.
+  group('a refused permission', () {
+    test('is bluetooth being unavailable', () {
+      expect(
+        classifyConnectError(
+          'UniversalBleException: Code: UniversalBleErrorCode.failed, '
+          'Message: Permissions denied: android.permission.ACCESS_FINE_LOCATION, '
+          'Details: FAILED',
+        ),
+        FlipperConnectErrorKind.bluetoothUnavailable,
+      );
+    });
+
+    // The singular spelling, and why the needle is the plural alone. Both of
+    // these are USB, both contain `permission denied`, and neither has
+    // anything to do with Bluetooth: the first is somebody dismissing
+    // Android's USB prompt, the second is `strerror(EACCES)` on a serial open
+    // and the most common Linux serial failure there is.
+    //
+    // `bluetoothUnavailable` has no USB body to fall back on, so matching
+    // these would tell a desktop user with a cable in their hand to turn
+    // Bluetooth on - the misclassification this file's own doc opens with,
+    // and #120. The literals are the ones the two throw sites hold, so a
+    // reword there that reintroduces the collision fails here.
+    for (final message in const [
+      'USB permission denied or port unavailable',
+      'Failed to open /dev/ttyACM0: Permission denied (code 13)',
+    ]) {
+      test('but a USB refusal is not: "$message"', () {
+        expect(
+          classifyConnectError(message),
+          isNot(FlipperConnectErrorKind.bluetoothUnavailable),
+        );
+      });
+    }
+  });
+
+  // QUNLEASHED-Y: the link came up to a device that presented no Flipper
+  // service at all - all four characteristics missing, which is Android
+  // handing over a stale cached service list rather than any one of them
+  // being absent.
+  group('a device with no Flipper service on it', () {
+    // The type arm, reached by the only input that can distinguish it. A real
+    // instance carries the sentence in its message, so it would classify
+    // through the needle whether the type check existed or not - which is
+    // what a mutation run deleting the type arm alone shows: every other case
+    // here stays green.
+    test('is read from the type, not only from its sentence', () {
+      expect(
+        classifyConnectError(_MaskedServicesMissing()),
+        FlipperConnectErrorKind.servicesMissing,
+      );
+    });
+
+    // What the type carries. `ble_services_missing_test.dart` drives the real
+    // throw site and pins the contents against discovery; this pins the one
+    // promise the class itself makes about them, which is that the list it
+    // hands out cannot be edited under its message.
+    test('and hands out a list that cannot be mutated', () {
+      final error = FlipperServicesMissingError(const ['overflow(abc)']);
+
+      expect(error.missing, ['overflow(abc)']);
+      expect(() => error.missing.add('rx(def)'), throwsUnsupportedError);
+    });
+
+    // The sentence without the type, which is the fallback arm. Delete the
+    // needle and this fails along with the partial-list case below; delete
+    // the type check as well and the first case goes too - three of the four
+    // here, which is what a mutation run over both arms shows.
+    //
+    // Two cases used to sit in this group asserting `isNot(deviceUnreachable)`
+    // and `isNot(stalePairing)` on this input. Delete the branch and the
+    // function returns `unknown`, which satisfies both - so they named the
+    // distinction the kind exists for and tested nothing, which is the shape
+    // CLAUDE.md calls out. The distinction itself is real and belongs here in
+    // prose: the device answered, so it is not out of range, and the bond is
+    // intact, so the pairing is not stale.
+    //
+    // The literal rather than the constant, so a reword at the throw site
+    // that left the needle behind fails here instead of going quietly back to
+    // `unknown`, which has a sentence of its own and so looks like nothing
+    // broke. It is also what keeps a `StateError` from an older build of this
+    // library classifying the same way.
+    //
+    // The list after the colon is not read by anything: the needle is the
+    // prefix, and there is no branch between a full list and a partial one.
+    // A case feeding a one-characteristic list used to sit here claiming to
+    // cover that, and could not fail - `ble_services_missing_test.dart` is
+    // where a partial list means something, because that is where it is
+    // produced.
+    test('and from the sentence alone, without the type', () {
+      expect(
+        classifyConnectError(
+          StateError(
+            'Missing Flipper BLE characteristics: '
+            'tx(19ed82ae-ed21-4c9d-4145-228e62fe0000), '
+            'rx(19ed82ae-ed21-4c9d-4145-228e61fe0000), '
+            'overflow(19ed82ae-ed21-4c9d-4145-228e63fe0000), '
+            'rpcStatus(19ed82ae-ed21-4c9d-4145-228e64fe0000)',
+          ),
+        ),
+        FlipperConnectErrorKind.servicesMissing,
+      );
+    });
+  });
+
   group('an incomplete pairing', () {
     for (final message in const [
       'PairingFailed',
@@ -163,6 +289,90 @@ void main() {
         );
       });
     }
+  });
+
+  // The strings Sentry received on 0.17.0's first day, as it received them.
+  //
+  // qUnleashed's `_reportUnknownConnect` raises one issue per unclassified
+  // string, which makes that list this function's to-do list - and these
+  // three were the whole of it. Spelled out whole rather than trimmed to the
+  // needle, so the case asserts that the field data classifies and not that
+  // the needle matches itself: a needle tested against the message it was cut
+  // from passes whatever the surrounding format does next.
+  group('a numeric GATT status', () {
+    for (final message in const [
+      // QUNLEASHED-V, which holds both codes, over three users.
+      // `universal_ble`'s own wording, with the status repeated in `Details`.
+      'UniversalBleException: Code: UniversalBleErrorCode.unknownError, '
+          'Message: Unknown Error 133, Details: Unknown Error 133',
+      'UniversalBleException: Code: UniversalBleErrorCode.unknownError, '
+          'Message: Unknown Error 147, Details: Unknown Error 147',
+      // QUNLEASHED-T, during an automatic reconnect.
+      'UniversalBleException: Code: UniversalBleErrorCode.invalidHandle, '
+          'Message: Failed to read, Details: 1',
+    ]) {
+      test('is read from "$message"', () {
+        expect(
+          classifyConnectError(message),
+          FlipperConnectErrorKind.deviceUnreachable,
+        );
+      });
+    }
+
+    // The shapes no event here has produced, kept in their own loop so the
+    // header above stays true of the three that did. A plugin that lets the
+    // `PlatformException` through rather than wrapping it writes the status
+    // this way; `status 147` and `gatt_error` are in the needle list by
+    // symmetry with their neighbours, which means nothing reaches them unless
+    // a case does - a mutation over that list would otherwise show both
+    // surviving.
+    //
+    // Each needle sits inside a longer sentence rather than alone, because a
+    // case whose whole content is the needle asserts only that `contains`
+    // works.
+    for (final message in const [
+      'PlatformException(gatt, status 133)',
+      'PlatformException(gatt, status 147)',
+      'android.bluetooth: GATT_ERROR while connecting',
+    ]) {
+      test('is read from the unobserved shape "$message"', () {
+        expect(
+          classifyConnectError(message),
+          FlipperConnectErrorKind.deviceUnreachable,
+        );
+      });
+    }
+
+    // The one unclassified string on that list that is *meant* to stay
+    // unclassified, and the reason this case exists: it looks like the four
+    // above and is nothing like them. `java.lang.NullPointerException` from
+    // inside `universal_ble`'s Android plugin is the plugin falling over, not
+    // a fact about the link - so telling somebody their Flipper is out of
+    // range would be an invention. `unknown` is the right answer here, and
+    // this pins it against the next pass through this list.
+    //
+    // QUNLEASHED-X and QUNLEASHED-W are that string; it was two issues rather
+    // than one because the message carries a Java stack trace whose line
+    // numbers differ per ROM, which is a fingerprint problem in the app and
+    // not a classification one.
+    test('and a plugin falling over is not one', () {
+      // Newline-separated and tab-indented, which is how the event carries
+      // it - the plugin concatenates `Log.getStackTraceString` whole. The
+      // frame list is trimmed. It makes no difference to this function, which
+      // lowercases and looks for substrings; the shape is kept because
+      // transcribing an event into a shape it does not have is how a fixture
+      // stops describing the thing it was taken from.
+      expect(
+        classifyConnectError(
+          'UniversalBleException: Code: UniversalBleErrorCode.unknownError, '
+          'Message: java.lang.NullPointerException, Details: Cause: null, '
+          'Stacktrace: java.lang.NullPointerException\n'
+          '\tat a2.F0.c(Unknown Source:127)\n'
+          '\tat android.os.Handler.handleCallback(Handler.java:938)\n',
+        ),
+        FlipperConnectErrorKind.unknown,
+      );
+    });
   });
 
   // A caller that awaits `connect` and then switches the session to RPC -
