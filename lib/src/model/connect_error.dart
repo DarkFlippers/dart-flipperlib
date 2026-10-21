@@ -238,6 +238,39 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
     // would have been the first one matching a sentence flipperlib writes
     // itself rather than a platform string. The cases below pin both.
     'permissions denied',
+    // The same refusal arriving from the other side of the same permission:
+    // not `universal_ble` reporting a check it made first, but Android's own
+    // `SecurityException` out of `BluetoothGatt.connect` when the grant is
+    // gone by the time the connect runs - `Need
+    // android.permission.BLUETOOTH_CONNECT permission for AttributionSource
+    // {...}: GattService registerClient`. The plural needle above is not a
+    // substring of it: "permission for", not "permissions denied". The one
+    // word they do share is "permission", which is the near miss that makes
+    // this worth a needle of its own rather than a widening of that one.
+    //
+    // QUNLEASHED-1C and -1D, 18 events between 13:21:37 and 13:24:09 on
+    // 2026-10-21, every one of them `connect.attempt: "manual"` - a person
+    // tapping connect again, not a retry loop. One install, not two: the two
+    // issues share `uid = 10829`, build and locale and differ only in the
+    // `BinderProxy@` identity hash the message carries, which is the same
+    // per-event noise that split QUNLEASHED-X from -W. The app had been open
+    // 1.3 seconds at the first event with `BLUETOOTH_CONNECT` already
+    // `not_granted`, so this is a grant that was never given in that session
+    // rather than one withdrawn under a running app - but the message is the
+    // same either way, which is why the needle reads the refusal and not the
+    // history.
+    //
+    // The permission's qualified name and not `securityexception`, which
+    // Android throws for every refused capability - a missing `INTERNET` on a
+    // socket open, a protected broadcast - and would file any of those that
+    // reached a connect under Bluetooth. Not `permission denied` singular
+    // either: the block above says why, and its two USB strings carry no
+    // `android.permission.` prefix, so this needle does not reintroduce that
+    // collision. The prefix with no suffix, so every `android.permission.
+    // BLUETOOTH*` name lands here - `BLUETOOTH_CONNECT` for the dial,
+    // `BLUETOOTH_SCAN` for the scan before it, and the legacy pair below
+    // Android 12. All of them want the one sentence this kind has.
+    'android.permission.bluetooth',
   ])) {
     return FlipperConnectErrorKind.bluetoothUnavailable;
   }
