@@ -286,6 +286,11 @@ void main() {
   // service at all - all four characteristics missing, which is Android
   // handing over a stale cached service list rather than any one of them
   // being absent.
+  //
+  // The three platform cases below it are the same condition seen one layer
+  // lower, where no service list arrived at all: bluez resolving nothing, and
+  // the Windows connect-time enumeration failing at either level. The two
+  // after those are the strings that look like them and are not.
   group('a device with no Flipper service on it', () {
     // The type arm, reached by the only input that can distinguish it. A real
     // instance carries the sentence in its message, so it would classify
@@ -311,9 +316,10 @@ void main() {
     });
 
     // The sentence without the type, which is the fallback arm. Delete the
-    // needle and this fails along with the partial-list case below; delete
-    // the type check as well and the first case goes too - three of the four
-    // here, which is what a mutation run over both arms shows.
+    // needle and this case fails; delete the type check as well and the first
+    // one goes too, which is what a mutation run over both arms shows. The
+    // platform cases below have needles of their own and are unaffected by
+    // either.
     //
     // Two cases used to sit in this group asserting `isNot(deviceUnreachable)`
     // and `isNot(stalePairing)` on this input. Delete the branch and the
@@ -347,6 +353,125 @@ void main() {
           ),
         ),
         FlipperConnectErrorKind.servicesMissing,
+      );
+    });
+
+    // The same condition reported by the platform instead of by us, which is
+    // the arm the two needles beside the sentence exist for. Both are the
+    // field strings whole, so the case asserts that what Sentry received
+    // classifies rather than that a needle matches itself.
+    //
+    // bluez reached this with no service list at all - the throw at
+    // `universal_ble_linux.dart` fires on
+    // `gattServices.isEmpty && !servicesResolved` - so there was never a
+    // characteristic to find missing. QUNLEASHED-1H.
+    test('is read from bluez resolving no services', () {
+      expect(
+        classifyConnectError(
+          'UniversalBleException: Code: UniversalBleErrorCode.failed, '
+          'Message: Failed to resolve services, Details: null',
+        ),
+        FlipperConnectErrorKind.servicesMissing,
+      );
+    });
+
+    // Windows, from the connect-time service enumeration. The prefix is what
+    // is read, and the whole point: this call site is the one that means the
+    // service list did not arrive.
+    //
+    // The shape is the one `link.dart` publishes a connect failure in, which
+    // is how it actually reaches the classifier - and it carries
+    // `disconnected` too, so before the needle existed it classified as the
+    // device being out of range. That makes this case the one that pins the
+    // block order as well as the needle: move the services block below the
+    // unreachable ones and `disconnected` wins again.
+    test('is read from the Windows service enumeration failing', () {
+      expect(
+        classifyConnectError(
+          'BLE backend connectionChange disconnected: '
+          'Failed to get services: ProtocolError [UNCLASSIFIED (see rawError)] '
+          '(link=ble budget=3 txPending=0 rpcSession=none)',
+        ),
+        FlipperConnectErrorKind.servicesMissing,
+      );
+    });
+
+    // One level in, and the reason that needle stops before the status word:
+    // whichever of the three a characteristic query returns, the service list
+    // is unusable and the remedy is the same.
+    test('and from its characteristics not arriving either', () {
+      expect(
+        classifyConnectError(
+          'UniversalBleException: Code: UniversalBleErrorCode.failed, '
+          'Message: Failed to get characteristics for service '
+          '19ed82ae-ed21-4c9d-9daa-d75579e1a388: Unreachable, Details: 1',
+        ),
+        FlipperConnectErrorKind.servicesMissing,
+      );
+    });
+
+    // The bare word, which is deliberately *not* this kind. It can only come
+    // from `ReadValue`, `WriteValue`, the descriptor pair or
+    // `SetNotifiableAsync`, all of which run after the map is built - so the
+    // services were found, and this kind's sentence would be false. It is
+    // QUNLEASHED-1G, and it stays `unknown` so the reporter keeps collecting
+    // it until something says which operation failed.
+    //
+    // `Details: 1` carries nothing: it is `UniversalBleErrorCode.failed`'s own
+    // integer, which `create_flutter_error` substitutes when no details are
+    // passed, and not an ATT code.
+    test('but a bare GATT rejection after discovery is not', () {
+      expect(
+        classifyConnectError(
+          'UniversalBleException: Code: UniversalBleErrorCode.failed, '
+          'Message: ProtocolError, Details: 1',
+        ),
+        FlipperConnectErrorKind.unknown,
+      );
+    });
+
+    // The string that keeps the two `failed to get ` needles apart. Collapse
+    // them to the shared prefix and this one is swallowed by the services
+    // block instead of reaching the kind that clears `_heardBle` - and the
+    // prefix would also catch this library's own `Failed to get FUS state`
+    // from the recovery runner.
+    test('and the same enumeration reaching it is still out of range', () {
+      expect(
+        classifyConnectError(
+          'UniversalBleException: Code: UniversalBleErrorCode.failed, '
+          'Message: Failed to get services: Unreachable, Details: 1',
+        ),
+        FlipperConnectErrorKind.deviceUnreachable,
+      );
+    });
+
+    // The near miss the colon in that needle exists for. `strerror`'s
+    // `ENETUNREACH` is a routing failure, not a Flipper out of range, so
+    // "move it closer" would be wrong - and nothing reaches the classifier
+    // with it today, which is why it is written down now rather than after.
+    test('but a routing failure that merely says the word is not', () {
+      expect(
+        classifyConnectError('Network is unreachable'),
+        FlipperConnectErrorKind.unknown,
+      );
+    });
+
+    // `Unreachable` is a separate value of the same enum, so the platform has
+    // already distinguished a device that did not answer from one whose GATT
+    // conversation failed, and the kinds follow that split.
+    //
+    // One direction only, and worth saying which: widen a needle in the
+    // services block to cover `Unreachable` and this fails. The other
+    // direction cannot be guarded here - that block runs first, so a needle
+    // added to the unreachable list for a string it already claims is dead
+    // code.
+    test('and is not what Windows says when the device did not answer', () {
+      expect(
+        classifyConnectError(
+          'UniversalBleException: Code: UniversalBleErrorCode.failed, '
+          'Message: Unreachable, Details: null',
+        ),
+        FlipperConnectErrorKind.deviceUnreachable,
       );
     });
   });
