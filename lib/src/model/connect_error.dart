@@ -146,6 +146,10 @@ enum FlipperConnectErrorKind {
   /// toggle refreshes and forgetting the device forces. Telling somebody to
   /// move closer, which is what `deviceUnreachable` says, would be wrong
   /// advice for a device sitting next to them. QUNLEASHED-Y.
+  ///
+  /// Android's stale cache is where it started and no longer all it covers:
+  /// bluez resolving nothing and the Windows service enumeration failing both
+  /// land here too. The needles carry the per-platform detail.
   servicesMissing,
   tooManyDevices,
 
@@ -313,9 +317,67 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
   // to agree on it, which is not the shape here - this is read once, from
   // inside `has`, like every other block.
   //
-  // This library's own sentence, so it shares no words with any needle above
-  // or below and its position here is for reading order, not precedence.
-  if (has([missingCharacteristicsMessage.toLowerCase()])) {
+  // The first needle is this library's own sentence. The rest are the
+  // platforms saying the same thing one layer lower, where we never get as
+  // far as looking for a characteristic because no service list arrived.
+  //
+  // This block's **position is now load-bearing**, which it was not when it
+  // held only the sentence. Windows publishes a connect failure through
+  // `link.dart`'s connection-change wrapper, which words it as
+  // `... connectionChange disconnected: Failed to get services: ...` - so the
+  // string carries `disconnected` as well, and the unreachable block below
+  // claims it if this one does not run first. The characteristics needle has
+  // the same problem from the other end: its string can end in `Unreachable`.
+  // Do not move this block for reading order; `connect_error_test.dart` pins
+  // it both ways.
+  if (has([
+    missingCharacteristicsMessage.toLowerCase(),
+    // bluez, from `universal_ble_linux.dart`.
+    //
+    // It is thrown on `gattServices.isEmpty && !servicesResolved`, but the
+    // wait above it finishes three different ways and none of them rethrows -
+    // the services resolving, the link dropping mid-resolution, and a ten
+    // second timeout all fall through to that one guard and raise this one
+    // sentence. So the string does not separate "connected and offered
+    // nothing" from "went away while we asked", and two of its three
+    // conditions are really [FlipperConnectErrorKind.deviceUnreachable].
+    //
+    // Filed here anyway, because the one remedy that helps all three is the
+    // one this kind leads with - reconnect after a Bluetooth toggle - and
+    // because the alternative is the generic sentence all three had before.
+    // If a report ever shows the range case dominating, this is the needle to
+    // revisit. QUNLEASHED-1H.
+    'failed to resolve services',
+    // Windows, from the connect-time service enumeration
+    // (`universal_ble_plugin.cpp`). `GattCommunicationStatus` becomes one of
+    // three strings (`windows/src/enum_parser.h`) - `Unreachable`,
+    // `ProtocolError`, `AccessDenied` - and the enumeration prefixes whichever
+    // it got.
+    //
+    // The prefix is the whole reason these are needled and the bare word is
+    // not. Only this call site and the characteristic one below it mean the
+    // service list did not arrive; the bare `ProtocolError` comes from
+    // `ReadValue`, `WriteValue`, the descriptor pair and `SetNotifiableAsync`,
+    // every one of which runs *after* the map is built - so the services were
+    // found, and this kind's sentence would be false. QUNLEASHED-1G is the
+    // bare form and is deliberately left `unknown`; what it needs is for the
+    // link to say which operation failed, which nothing carries today.
+    //
+    // `Unreachable` is read below, into being out of range, and `AccessDenied`
+    // by the `accessdenied` needle above - though that one was cut for the
+    // pairing enum and catches this one by coincidence, so narrowing it there
+    // would quietly drop this.
+    'failed to get services: protocolerror',
+    // The same enumeration, one level in: the service list arrived and a
+    // service's characteristics did not. Unprefixed by status on purpose, so
+    // it reads whichever of the three the query returned - but only
+    // `ProtocolError` actually lands here. `AccessDenied` is taken by the
+    // `accessdenied` needle in the Bluetooth block, which runs first, and
+    // `Unreachable` by the needle below. Both of those are the right answers
+    // for their string, so the needle is left wide rather than narrowed to a
+    // status it would then have to keep in step.
+    'failed to get characteristics for service',
+  ])) {
     return FlipperConnectErrorKind.servicesMissing;
   }
 
@@ -371,6 +433,19 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
     // of its own - so it belongs with being out of range and not in its own
     // bucket. Seen during an automatic reconnect. QUNLEASHED-T.
     'invalidhandle',
+    // The third `GattCommunicationStatus` value; the services block above
+    // reads the other two. qUnleashed#386.
+    //
+    // The colon, not the bare word: both producers write the status after one
+    // (`Message: Unreachable`, `Failed to get services: Unreachable`), while
+    // `strerror`'s `Network is unreachable` has a space there and must stay
+    // `unknown` - "move it closer" is wrong advice for a routing failure.
+    //
+    // This needle does more than pick a sentence: `LinkService` clears the
+    // device from `_heardBle` on this kind alone, so the row in the picker
+    // stops claiming the Flipper is in reach. That is the right answer for
+    // this string and is the reason it is not filed with the services ones.
+    ': unreachable',
   ])) {
     return FlipperConnectErrorKind.deviceUnreachable;
   }
