@@ -184,6 +184,102 @@ void main() {
         );
       });
     }
+
+    // QUNLEASHED-1C and -1D. The needle's own comment holds the field data
+    // and the argument for its shape; what belongs here is that this reached
+    // `unknown` before it - which the events record rather than imply, both
+    // carrying `connect.kind: "unknown"` - and why the fixture looks like
+    // this.
+    //
+    // What makes the message hard is the words it does *not* contain: no
+    // "denied", no "unauthorized", no "bluetooth is". So it is kept whole
+    // rather than trimmed to the part the needle reads, which would be the
+    // needle tested against itself.
+    //
+    // Whole includes the shape. `ConnectionException` wraps
+    // `UniversalBleException`, which repeats under `Message:` with
+    // `Log.getStackTraceString` concatenated after it, so the inner
+    // `SecurityException` appears again under `Stacktrace:`. The frame list
+    // is trimmed, as the X/W case two groups down trims its own and for the
+    // reason stated there.
+    test('is read from Android throwing it at connect time', () {
+      expect(
+        classifyConnectError(
+          'ConnectionException: UniversalBleException: Code: '
+          'UniversalBleErrorCode.unknownError, Message: UniversalBleException: '
+          'Code: UniversalBleErrorCode.unknownError, Message: '
+          'java.lang.SecurityException: Need android.permission.'
+          'BLUETOOTH_CONNECT permission for AttributionSource { uid = 10829, '
+          'packageName = com.darkflippers.qunleashed, attributionTag = null, '
+          'token = android.os.BinderProxy@32b4c3a, next = null }: '
+          'GattService registerClient, Details: Cause: null, Stacktrace: '
+          'java.lang.SecurityException: Need android.permission.'
+          'BLUETOOTH_CONNECT permission for AttributionSource { uid = 10829, '
+          'packageName = com.darkflippers.qunleashed, attributionTag = null, '
+          'token = android.os.BinderProxy@32b4c3a, next = null }: '
+          'GattService registerClient\n'
+          '\tat android.os.Parcel.createExceptionOrNull(Parcel.java:2437)\n'
+          '\tat android.bluetooth.BluetoothGatt.connect(BluetoothGatt.java:1109)\n'
+          '\tat android.os.Looper.loop(Looper.java:313)\n'
+          '\tat android.app.ActivityThread.main(ActivityThread.java:8663)\n',
+        ),
+        FlipperConnectErrorKind.bluetoothUnavailable,
+      );
+    });
+
+    // The scan permission reaches the same kind, which is the reason the
+    // needle stops at the prefix: a dial scans before it connects, so either
+    // can be what was refused, and the two want the one sentence this kind
+    // has. `startScan` rather than `GattService registerClient` because that
+    // is the operation Android names for this one.
+    test('is read for the scan permission too', () {
+      expect(
+        classifyConnectError(
+          'java.lang.SecurityException: Need android.permission.BLUETOOTH_SCAN '
+          'permission for AttributionSource {...}: startScan',
+        ),
+        FlipperConnectErrorKind.bluetoothUnavailable,
+      );
+    });
+
+    // The boundary the needle actually draws, which is the prefix *and* a
+    // Bluetooth suffix. Nothing above pins the suffix half: the case below
+    // carries no `android.permission.` at all, so it would stay green against
+    // a widening to the bare prefix - which is the plausible next loosening,
+    // and the one the needle's own comment argues against in prose.
+    //
+    // Asserted as `unknown` and not as "not bluetoothUnavailable": the weaker
+    // form also passes if a later needle files this under `pairingIncomplete`
+    // or `deviceUnreachable`, which is a misclassification just as wrong as
+    // the one being guarded. Two cases in this file were deleted for exactly
+    // that shape; see the services-missing group.
+    test('but another android.permission.* refusal is not', () {
+      expect(
+        classifyConnectError(
+          'java.lang.SecurityException: Need '
+          'android.permission.READ_EXTERNAL_STORAGE permission for '
+          'AttributionSource {...}: openFile',
+        ),
+        FlipperConnectErrorKind.unknown,
+      );
+    });
+
+    // The singular spelling asserted as `unknown`, which is what this case
+    // alone covers: the USB pair above pins the same word with the weaker
+    // `isNot`, for the reason the case above gives. The input is libcore's
+    // `SecurityException`, thrown out of `IoBridge` on a socket open, so it
+    // also stands as the non-Bluetooth capability the needle must not read -
+    // though the case above already fails against a bare `securityexception`
+    // needle, being a `SecurityException` itself.
+    test('but a SecurityException about something else is not', () {
+      expect(
+        classifyConnectError(
+          'java.lang.SecurityException: Permission denied (missing '
+          'INTERNET permission?)',
+        ),
+        FlipperConnectErrorKind.unknown,
+      );
+    });
   });
 
   // QUNLEASHED-Y: the link came up to a device that presented no Flipper
