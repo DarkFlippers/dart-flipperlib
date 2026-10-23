@@ -410,6 +410,40 @@ void main() {
       );
     });
 
+    // Android, the third platform. Two sites emit this one sentence and the
+    // plugin passes nothing that separates them, so the field string carries
+    // no status prefix or suffix - the whole sentence is the needle, and this
+    // case is what says so. The bare form and not a wrapped one: Android
+    // reports a connect failure through `connectionChange` as an HCI status
+    // name, never as a plugin sentence, so this string reaches the classifier
+    // only the way it is written here. QUNLEASHED-1B.
+    test('is read from Android not discovering them', () {
+      expect(
+        classifyConnectError(
+          'UniversalBleException: Code: UniversalBleErrorCode.failed, '
+          'Message: Failed to discover services, Details: FAILED',
+        ),
+        FlipperConnectErrorKind.servicesMissing,
+      );
+    });
+
+    // The same call's other arm, and the near miss that needle's wording has
+    // to clear. `configure` lets the platform exception above through bare
+    // and rewraps only the timeout, into this library's own sentence - and a
+    // discovery that never answered is a dead link rather than a device
+    // offering nothing, so it has to reach the kind `LinkService` clears
+    // `_heardBle` on, or the picker goes on claiming the Flipper is in reach.
+    //
+    // Word order is the whole guard: "service discovery", not "discover
+    // services". Widen the needle above to `discover` and this string goes
+    // with it, and nothing else in the file would say so.
+    test('but its own timeout of that same call is still out of range', () {
+      expect(
+        classifyConnectError('BLE service discovery timed out after 10s'),
+        FlipperConnectErrorKind.deviceUnreachable,
+      );
+    });
+
     // The bare word, which is deliberately *not* this kind. It can only come
     // from `ReadValue`, `WriteValue`, the descriptor pair or
     // `SetNotifiableAsync`, all of which run after the map is built - so the

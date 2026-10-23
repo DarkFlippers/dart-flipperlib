@@ -318,8 +318,9 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
   // inside `has`, like every other block.
   //
   // The first needle is this library's own sentence. The rest are the
-  // platforms saying the same thing one layer lower, where we never get as
-  // far as looking for a characteristic because no service list arrived.
+  // platforms saying the same thing one layer lower: no service list arrived
+  // at all, or - in the characteristics needle alone - it arrived and a
+  // service's characteristics did not.
   //
   // This block's **position is now load-bearing**, which it was not when it
   // held only the sentence. Windows publishes a connect failure through
@@ -348,6 +349,35 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
     // If a report ever shows the range case dominating, this is the needle to
     // revisit. QUNLEASHED-1H.
     'failed to resolve services',
+    // Android, from `UniversalBlePlugin.kt` - the third platform's wording of
+    // the same condition, and the one this block was missing.
+    //
+    // Two sites emit this one sentence: `gatt.discoverServices()` returning
+    // false, which means the request could not even be issued, and
+    // `onServicesDiscovered` arriving with a status other than
+    // `GATT_SUCCESS`. Neither the boolean nor the status is passed to
+    // `createFlutterError`, so the string cannot separate them.
+    //
+    // Unlike the sentence above it, though, neither arm is misfiled here. A
+    // link that drops mid-discovery does not produce this string: the
+    // plugin's disconnect cleanup fails the pending discovery with its own
+    // `Device Disconnected`. So both arms really are a link that came up with
+    // no service list on it, which is this kind and nothing else.
+    //
+    // The whole sentence and no status prefix - there is no status to read,
+    // and the near miss this needle has to clear is a word order rather than
+    // a status. `configure` rewraps its own discovery timeout as `BLE service
+    // discovery timed out after ...`, which has to stay out of this block and
+    // reach the kind that clears `_heardBle`; "service discovery" is not
+    // "discover services", and widening this needle to `discover` would take
+    // it. `connect_error_test.dart` pins both sides of that.
+    //
+    // The other `_ops.discoverServices` call, in `link.dart`'s pairing
+    // reconnect loop, does run after the characteristic map is built - but
+    // its catch logs and continues instead of propagating, so this sentence
+    // reaches the classifier only from the pre-map site. QUNLEASHED-1B, which
+    // reached `unknown` before this needle.
+    'failed to discover services',
     // Windows, from the connect-time service enumeration
     // (`universal_ble_plugin.cpp`). `GattCommunicationStatus` becomes one of
     // three strings (`windows/src/enum_parser.h`) - `Unreachable`,
