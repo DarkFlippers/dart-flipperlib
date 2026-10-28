@@ -163,6 +163,31 @@ enum FlipperConnectErrorKind {
   /// picker. qUnleashed#120.
   sessionLimit,
   busy,
+
+  /// The phone's own Bluetooth stack or its plugin fell over, and said nothing
+  /// about the link.
+  ///
+  /// Separate from every kind above because it is not a fact about the
+  /// Flipper, the bond, the range or the user's settings - there is nothing
+  /// for them to go and change. And separate from [unknown] because
+  /// [unknown]'s sentence is not nothing: it tells the user to turn Bluetooth
+  /// off and on *in the device system menu*, which is the Flipper's, for a
+  /// fault in the handset. That is the same kind of invention as telling
+  /// somebody their Flipper is out of range, which is why
+  /// `connect_error_test.dart` used to pin this string to [unknown].
+  ///
+  /// `java.lang.NullPointerException` out of `universal_ble`'s Android plugin
+  /// is the observed one: qUnleashed QUNLEASHED-10 and ten siblings, about
+  /// eleven users, every event an automatic attempt roughly six seconds after
+  /// launch with identical obfuscated frames on Android 12 and Android 16. The
+  /// fault itself is upstream and cannot be fixed from Dart; what this kind
+  /// fixes is what the user is told about it.
+  ///
+  /// Still reported. qUnleashed's `_reportUnknownConnect` collects [unknown]
+  /// so the classifier can be taught, and a kind that merely silenced a live
+  /// plugin bug would be worse than the wrong sentence - so the app reports
+  /// this one too, under its own name.
+  platformFault,
   unknown,
 }
 
@@ -482,6 +507,22 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
 
   if (_namesGattUnreachable(e)) {
     return FlipperConnectErrorKind.deviceUnreachable;
+  }
+
+  // Last, and that is what makes it safe to be this broad. Every needle above
+  // has already had its say, so a string that names both a cause somebody can
+  // act on and a Java throwable is classified by the cause - a refused
+  // `BLUETOOTH_CONNECT` arrives as a `SecurityException` and is picked up by
+  // the permission needles far above, not here.
+  //
+  // The exception's own name and not `java.lang.`, which would swallow
+  // whatever arrives next. `_gattUnreachableStatuses` is the lesson: matching
+  // the shape instead of the value put two different Windows HRESULTs in one
+  // issue, titled after whichever came first, and the second was never
+  // learned. A throwable this does not name is better left `unknown`, which
+  // is what the reporter collects and how this one was found.
+  if (has(['nullpointerexception'])) {
+    return FlipperConnectErrorKind.platformFault;
   }
 
   return FlipperConnectErrorKind.unknown;
