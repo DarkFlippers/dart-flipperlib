@@ -661,19 +661,26 @@ void main() {
       });
     }
 
-    // The one unclassified string on that list that is *meant* to stay
-    // unclassified, and the reason this case exists: it looks like the four
-    // above and is nothing like them. `java.lang.NullPointerException` from
+    // Not one of these, and no longer `unknown` either. It looks like the four
+    // above and is nothing like them: `java.lang.NullPointerException` from
     // inside `universal_ble`'s Android plugin is the plugin falling over, not
-    // a fact about the link - so telling somebody their Flipper is out of
-    // range would be an invention. `unknown` is the right answer here, and
-    // this pins it against the next pass through this list.
+    // a fact about the link, so telling somebody their Flipper is out of range
+    // would be an invention.
     //
-    // QUNLEASHED-X and QUNLEASHED-W are that string; it was two issues rather
-    // than one because the message carries a Java stack trace whose line
-    // numbers differ per ROM, which is a fingerprint problem in the app and
-    // not a classification one.
-    test('and a plugin falling over is not one', () {
+    // **This case pinned `unknown` until qUnleashed#436, and that reading is
+    // worth keeping in view.** It was right about what it ruled out and
+    // reasoned from the kinds that existed: none of them fitted, so `unknown`.
+    // What it did not weigh is that `unknown` is not silence - its sentence
+    // tells the user to turn Bluetooth off and on *in the device system menu*,
+    // which is the Flipper's, for a fault in the handset. That is the same
+    // invention in a different direction, and the option that was missing is a
+    // kind of its own. [FlipperConnectErrorKind.platformFault] is it.
+    //
+    // QUNLEASHED-X and QUNLEASHED-W were that string arriving as two issues,
+    // because the message carries a Java stack trace whose line numbers differ
+    // per ROM. That half really was a fingerprint problem in the app and not a
+    // classification one, and qUnleashed#378 fixed it there.
+    test('is the platform falling over, which is its own kind', () {
       // Newline-separated and tab-indented, which is how the event carries
       // it - the plugin concatenates `Log.getStackTraceString` whole. The
       // frame list is trimmed. It makes no difference to this function, which
@@ -687,6 +694,36 @@ void main() {
           'Stacktrace: java.lang.NullPointerException\n'
           '\tat a2.F0.c(Unknown Source:127)\n'
           '\tat android.os.Handler.handleCallback(Handler.java:938)\n',
+        ),
+        FlipperConnectErrorKind.platformFault,
+      );
+    });
+
+    // The near miss, and why the needle is the exception's own name. A refused
+    // `BLUETOOTH_CONNECT` reaches us as a `SecurityException` out of
+    // `BluetoothGatt.connect`, which is a Java throwable in a connect error
+    // and is emphatically *not* a plugin fault - there is something for the
+    // user to do. It is classified far above this needle, and this is what
+    // says the ordering holds.
+    test('while a refused permission is still the permission', () {
+      expect(
+        classifyConnectError(
+          'PlatformException(connect, Need android.permission.'
+          'BLUETOOTH_CONNECT permission for AttributionSource{...}: '
+          'GattService registerClient, null, null)',
+        ),
+        FlipperConnectErrorKind.bluetoothUnavailable,
+      );
+    });
+
+    // And a throwable nobody has filed yet stays collectable. The reporter is
+    // how the one above was found, so a blanket `java.lang.` needle would have
+    // closed the door behind itself.
+    test('while an unfiled Java throwable stays unknown', () {
+      expect(
+        classifyConnectError(
+          'PlatformException(connect, java.lang.IllegalStateException: '
+          'some new thing, null, null)',
         ),
         FlipperConnectErrorKind.unknown,
       );
