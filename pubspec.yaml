@@ -18,6 +18,12 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Direct, though it arrives transitively under universal_ble anyway (via
+  # `bluez`): `LinuxBlePlatform` asks the system bus whether it can produce
+  # `org.bluez` before letting the plugin's backend touch it, and a package a
+  # file imports by name is a dependency it declares. Pure Dart, so importing
+  # it costs nothing on the four platforms that never call it.
+  dbus: ^0.7.12
   ffi: ^2.1.3
   fixnum: ^1.1.1
   flutter_libserialport: ^0.6.0
