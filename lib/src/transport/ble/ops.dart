@@ -57,17 +57,35 @@ abstract class BleOps {
   Future<BleConnState?> getConnectionState(String deviceId);
 }
 
+/// [BleOps] over universal_ble itself: the only file in this library that
+/// touches the plugin's callbacks.
+///
+/// Which is what made universal_ble 3.0.0's two breaking callback changes a
+/// two-line edit. It collapsed `onConnectionChange`'s three positional
+/// arguments into one `BleConnectionChange` and `onValueChange`'s four into a
+/// `BleCharacteristicValue`; [BleOps] keeps the positional shape, so the
+/// destructuring stops here and `link.dart`, the fakes in `ble_fixtures.dart`
+/// and every test above them were untouched by the bump.
 class UniversalBleOps implements BleOps {
   @override
   set onConnectionChange(void Function(String, bool, String?)? cb) {
     uble.UniversalBle.onConnectionChange = cb == null
         ? null
-        : (did, conn, err) => cb(did, conn, err?.toString());
+        // `error` is already the platform's string here; through 2.x the
+        // third argument was an object this had to `toString()`.
+        : (change) => cb(change.deviceId, change.isConnected, change.error);
   }
 
   @override
   set onValueChange(void Function(String, String, Uint8List, int?)? cb) {
-    uble.UniversalBle.onValueChange = cb;
+    uble.UniversalBle.onValueChange = cb == null
+        ? null
+        : (value) => cb(
+            value.deviceId,
+            value.characteristicId,
+            value.value,
+            value.timestamp,
+          );
   }
 
   @override

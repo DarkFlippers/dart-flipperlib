@@ -318,6 +318,13 @@ abstract class UniversalBleTransportBase extends Transport {
     }
   }
 
+  // The outer bound matters more since universal_ble 3.0.0 than it did
+  // before: on Apple and Linux `requestMtu` now discovers services on demand
+  // rather than answering out of whatever it had, and its own `timeout`
+  // bounds each step - so a call that has to discover first can take up to
+  // roughly twice that inside the plugin. This is what bounds the whole of
+  // it, and a failure here is caught and falls back to the figure already
+  // held (see [_applyMtu]).
   Future<int> _requestMtu(String deviceId) =>
       _ops.requestMtu(deviceId, _requestedMtu).timeout(_gattOpTimeout);
 
@@ -336,6 +343,15 @@ abstract class UniversalBleTransportBase extends Transport {
   /// gives no completion signal for the exchange, and a reconnect can be served
   /// from its service cache without fresh ATT traffic at all. If a link ever
   /// still reports 23 here, the slow-link warning below is what says so.
+  ///
+  /// universal_ble 3.0.0 weakened that premise rather than retiring it. On
+  /// Apple `requestMtu` now discovers services on demand before answering,
+  /// so the earlier read in [configureConnected] is no longer taken before
+  /// any ATT traffic has happened. What has not changed is why the re-read
+  /// cannot be dropped: CoreBluetooth still gives no completion signal for
+  /// the MTU exchange, a reconnect can still be served from the service cache
+  /// without fresh traffic, and this also runs after a pairing reconnect,
+  /// where the figure held belongs to the previous link.
   ///
   /// Takes the new reading rather than the larger of the two, because this also
   /// runs after a pairing reconnect, where the previous link's figure is not

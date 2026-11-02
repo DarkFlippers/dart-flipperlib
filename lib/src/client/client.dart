@@ -865,11 +865,23 @@ class FlipperClient {
     String? name,
     Duration timeout = bleAddressConnectTimeout,
   }) async {
-    final known = _devices['${FlipperLink.ble.name}:$address'];
+    // Canonical before anything keys or compares on it. Unlike a scanned
+    // device, this id did not come from the plugin: it came out of the
+    // caller's own store, and in qUnleashed's case out of one written by a
+    // build that ran universal_ble 2.x, which upper-cased MACs on Android.
+    // From 3.0.0 the plugin emits lower-case on every native platform, and
+    // the connect itself would still work - the native side converts back at
+    // its boundary - so what an uncanonical id breaks is everything that
+    // compares afterwards: the cache key below, and then the transport
+    // registering its callback dispatch under one spelling while every
+    // connection and value event for the link arrives under the other and is
+    // dropped on an id mismatch. See [canonicalBleDeviceId].
+    final id = canonicalBleDeviceId(address);
+    final known = _devices['${FlipperLink.ble.name}:$id'];
     final device =
         known ??
         _fromDiscovered(
-          BleDiscoveredDevice(uble.BleDevice(deviceId: address, name: name)),
+          BleDiscoveredDevice(uble.BleDevice(deviceId: id, name: name)),
         );
     await _awaitBleAvailable(bleAvailabilityWait);
     try {
@@ -877,9 +889,9 @@ class FlipperClient {
       _rememberDevice(connected);
       return connected;
     } on TimeoutException {
-      await disconnectDevice(address, link: FlipperLink.ble);
+      await disconnectDevice(id, link: FlipperLink.ble);
       throw FlipperTransportError(
-        'BLE connect to $address timed out after ${timeout.inSeconds}s',
+        'BLE connect to $id timed out after ${timeout.inSeconds}s',
       );
     }
   }
