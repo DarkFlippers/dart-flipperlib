@@ -9,12 +9,23 @@
 /// naming: no connected state, no notifications, and the same Flipper listed
 /// twice. #444.
 ///
+/// A case fold, and nothing else. It does not accept a MAC written with
+/// dashes, or with the separators left out, or with a space on the end: those
+/// are a different id as far as this library is concerned, and the platform
+/// is what rejects them. Worth knowing because the failure mode differs - a
+/// wrong *case* connects and then goes silent, which is why this exists,
+/// while a wrong *shape* fails the connect with the platform's own sentence.
+///
 /// Written here rather than delegated to `UniversalBle.canonicalDeviceId`,
 /// which exists for exactly this and gives the same answer on every platform
-/// this library implements. The delegation costs a first touch of the plugin:
-/// reading `UniversalBle._platform` constructs the backend for the host, which
-/// sets up a Pigeon callback channel, and on Linux builds a `BlueZClient`
-/// whose own constructor calls `DBusClient.system()` - parsing
+/// this library implements (read from universal_ble 3.2.0). The delegation
+/// costs a first touch of the plugin: reading `UniversalBle._platform`
+/// constructs the backend for the host, and whichever one that is costs
+/// something. On Android, Apple and Windows it is the Pigeon channel, whose
+/// constructor calls `UniversalBleCallbackChannel.setUp` and so needs a
+/// binding - which is what the test below catches. On Linux it is
+/// `UniversalBleLinux`, whose only constructor work is a `BlueZClient` field,
+/// and whose own constructor calls `DBusClient.system()` - parsing
 /// `DBUS_SYSTEM_BUS_ADDRESS` eagerly and throwing `FormatException`,
 /// synchronously, on a host whose address carries no transport prefix. This
 /// function runs at the top of `connectBleAddress`, above the availability

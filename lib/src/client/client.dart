@@ -868,14 +868,25 @@ class FlipperClient {
     // Canonical before anything keys or compares on it. Unlike a scanned
     // device, this id did not come from the plugin: it came out of the
     // caller's own store, and in qUnleashed's case out of one written by a
-    // build that ran universal_ble 2.x, which upper-cased MACs on Android.
+    // build that ran universal_ble 2.x - which upper-cased MACs on Android
+    // and reported Apple's peer UUID as its upper-case `uuidString`, so this
+    // is not an Android-only migration.
+    //
     // From 3.0.0 the plugin emits lower-case on every native platform, and
     // the connect itself would still work - the native side converts back at
     // its boundary - so what an uncanonical id breaks is everything that
-    // compares afterwards: the cache key below, and then the transport
-    // registering its callback dispatch under one spelling while every
-    // connection and value event for the link arrives under the other and is
-    // dropped on an id mismatch. See [canonicalBleDeviceId].
+    // compares afterwards: the device cache keyed below, and then the
+    // transport registering its callback dispatch under one spelling while
+    // every connection and value event for the link arrives under the other
+    // and matches nothing. See [canonicalBleDeviceId].
+    //
+    // This is the only entry here that canonicalises, not the only one that
+    // could want to: `isDeviceConnected`, `activateById` and
+    // `disconnectDevice` all compare a caller's id with `!=` through
+    // `_findSession`, and `disconnectDevice` answers a miss by returning
+    // normally. Nothing reaches them with an uncanonical id today - the host
+    // canonicalises what it stores - and making that boundary uniform is its
+    // own change.
     final id = canonicalBleDeviceId(address);
     final known = _devices['${FlipperLink.ble.name}:$id'];
     final device =

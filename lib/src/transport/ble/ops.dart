@@ -57,10 +57,12 @@ abstract class BleOps {
   Future<BleConnState?> getConnectionState(String deviceId);
 }
 
-/// [BleOps] over universal_ble itself: the only file in this library that
-/// touches the plugin's callbacks.
+/// [BleOps] over universal_ble itself: the only file that touches the
+/// plugin's *per-link* callbacks. (`onScanResult` is the exception, set and
+/// cleared inside `_scanBleLocked` in `client.dart`; 3.0.0 left its signature
+/// alone.)
 ///
-/// Which is what made universal_ble 3.0.0's two breaking callback changes a
+/// That is what made universal_ble 3.0.0's two breaking callback changes a
 /// two-line edit. It collapsed `onConnectionChange`'s three positional
 /// arguments into one `BleConnectionChange` and `onValueChange`'s four into a
 /// `BleCharacteristicValue`; [BleOps] keeps the positional shape, so the
@@ -71,8 +73,13 @@ class UniversalBleOps implements BleOps {
   set onConnectionChange(void Function(String, bool, String?)? cb) {
     uble.UniversalBle.onConnectionChange = cb == null
         ? null
-        // `error` is already the platform's string here; through 2.x the
-        // third argument was an object this had to `toString()`.
+        // `error` is the platform's own sentence, and it already was in
+        // 2.x: `OnConnectionChange` declared `String? error` as far back as
+        // 1.2.0, so the `err?.toString()` this replaces was a no-op. What
+        // 3.0.0 changed is only that it arrives on an object. The two fields
+        // that came with it, `errorCode` and `nativeErrorCode`, are dropped
+        // here - `classifyConnectError` still reads the sentence - which is
+        // #436's business and not a bump's.
         : (change) => cb(change.deviceId, change.isConnected, change.error);
   }
 

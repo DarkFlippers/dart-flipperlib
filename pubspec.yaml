@@ -43,11 +43,12 @@ dependencies:
   # runs two engines - `main()` and the headless `widgetMain()` - and that is
   # the path nobody runs locally. 3.0.0 keeps the cache per engine.
   #
-  # The floor is 3.2.0 rather than 3.0.0 for two more: 3.1.1 compiles the
-  # Windows plugin with `/utf-8`, without which a clean build fails on a
-  # machine whose ANSI code page is 936/932/949/950, and 3.1.2 stops a failed
-  # Windows connect - the device dropping the link mid-discovery, which is
-  # what a Flipper rebooting does - from freezing the app window.
+  # The floor is 3.2.0 rather than 3.0.0 for three more, all of them Windows:
+  # 3.1.1 compiles the plugin with `/utf-8`, without which a clean build fails
+  # on a machine whose ANSI code page is 936/932/949/950; 3.1.2 stops a failed
+  # connect - the device dropping the link mid-discovery, which is what a
+  # Flipper rebooting does - from freezing the app window; and 3.2.0 itself
+  # opens with "Fix Windows compilation", which is why the floor is not 3.1.2.
   #
   # What 3.0.0 broke and where it is absorbed: the two callback signatures in
   # `transport/ble/ops.dart`, the `QueueType` default in

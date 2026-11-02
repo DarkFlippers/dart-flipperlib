@@ -42,10 +42,20 @@ BlePlatform _configuredBlePlatform() {
 /// ordering. Moving to `auto` is a change of its own, with its own testing on
 /// a real device per platform.
 ///
-/// Dart-side state only: the setter writes to the plugin's command queue
-/// object and reaches no backend, so it is safe on a Linux host where bluez
-/// cannot start - where a call that did reach one would orphan a rejection
-/// and be filed as a fatal crash (#443).
+/// What it costs, since the choice is ours: one queue means a command waits
+/// behind every other device's, and the queue *wait* is unbounded - only
+/// execution is bounded. `_pairingOpTimeout` is five minutes, so a link
+/// sitting in a PIN prompt holds up the other sessions' commands for as long
+/// as it lasts. `auto`'s per-device queue is the answer to that, and taking
+/// it is the separate change.
+///
+/// Dart-side state only, read from universal_ble 3.2.0: the setter assigns to
+/// the command queue object's field and logs at a level that is `none` unless
+/// a debug build raised it, and the queue is a lazy static whose
+/// `isAddressSupplier` closure is not called at construction - so nothing
+/// here reads `_platform`. That makes it safe on a Linux host where bluez
+/// cannot start, where a call that did reach the backend would orphan a
+/// rejection and be filed as a fatal crash (#443).
 void _serialiseBleCommands() =>
     uble.UniversalBle.queueType = uble.QueueType.global;
 

@@ -314,10 +314,13 @@ void main() {
       // no controller cannot survive, and that is one deleted `if` away. This
       // is the arm that has to exist, not just precede.
       //
-      // Textual, and that is this guard's limit: the behavioural version wants
-      // `FlipperClient` to take its `BlePlatform` as a constructor parameter
-      // instead of reading the global, which is the target DI pattern (ADR
-      // 0002) and a wider change than the fix it would be testing.
+      // Textual, and that is this guard's limit - though a narrower
+      // behavioural version turns out to be reachable: `UniversalBle` exposes
+      // `setInstance`, so a fake platform answering `unsupported` with a
+      // counting `availabilityStream` can assert that nothing subscribed.
+      // `ble_connect_address_test.dart` uses that seam for the id. Writing
+      // this one is worth doing and is not part of the bump that found the
+      // seam.
       final body = bodyOf(
         code['lib/src/client/client.dart']!,
         'Future<void> _awaitBleAvailable(',
@@ -342,57 +345,20 @@ void main() {
   });
 
   // Not about initialisation, and here for the one property this file's
-  // instrument has: both are things the library must do because of what the
-  // plugin does, and neither leaves a trace any behavioural case in this
-  // package can read. `FlipperClient` builds its own `BlePlatform` from the
-  // top-level global and the queue type has no getter, so the behavioural
-  // versions want DI that is wider than the fix (the same limit the
-  // `unsupported` case above records).
+  // instrument has. The plugin's command queue is configured by a setter with
+  // no getter, and `BleCommandQueue` is not exported, so there is nothing a
+  // behavioural case can read back - which is the whole of why this one is
+  // text.
+  //
+  // The canonicalisation that arrived with the same bump is deliberately
+  // *not* here, and that is the distinction worth recording: it was, as a
+  // source assertion over `connectBleAddress`, and the assertion could not
+  // see a mutant that canonicalised and then built the `BleDevice` from the
+  // raw address anyway - #444 restored with the fix visibly present in the
+  // diff. `ble_connect_address_test.dart` asserts the id that comes out
+  // instead, through the real method, with the plugin replaced by
+  // `UniversalBle.setInstance`.
   group('what universal_ble 3.x asks of the caller', () {
-    test('connectBleAddress canonicalises before anything keys on the id', () {
-      // The id handed to this method is the only one in the library that did
-      // not come from the plugin: it comes out of the caller's store, and in
-      // qUnleashed's case out of one written while Android upper-cased MACs.
-      // Drop the canonicalisation and the connect still succeeds - so a smoke
-      // test on a fresh install passes - while the remembered device reports
-      // no connected state and no notifications, because the transport
-      // registers its dispatch under one spelling and every event arrives
-      // under the other. #444.
-      final body = bodyOf(
-        code['lib/src/client/client.dart']!,
-        'Future<FlipperDevice> connectBleAddress(',
-      );
-
-      final canonical = body.indexOf('canonicalBleDeviceId(address)');
-      expect(
-        canonical,
-        isNot(-1),
-        reason:
-            'connectBleAddress no longer canonicalises the address it was '
-            'handed, so a stored upper-case MAC connects and then matches '
-            'nothing it is compared against.',
-      );
-
-      // One read of the parameter, and case one says which read it is. That
-      // pair is the whole assertion, and it is stronger than the three
-      // orderings it replaced: anything else in the method that wants the id
-      // has to use `id`, which cannot be declared after its first use. Those
-      // orderings let a mutant that keyed the device cache off `address`
-      // while still canonicalising for everything below it survive - a
-      // remembered device whose live session is then never found, so it
-      // reconnects instead of swapping instantly.
-      expect(
-        RegExp(r'\baddress\b')
-            .allMatches(body), // the parameter, not `bleAddress…`
-        hasLength(1),
-        reason:
-            'the address this method was handed is read more than once, so '
-            'something below the canonicalisation is still using the '
-            'caller\'s spelling of the id rather than the one every callback '
-            'and every other key in the library uses.',
-      );
-    });
-
     test('the plugin command queue is pinned, not inherited', () {
       // 3.0.0 changed the default from `global` to `auto`, which is parallel
       // on Apple and Windows. Nothing in this library switches on QueueType,
