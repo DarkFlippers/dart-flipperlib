@@ -6,6 +6,50 @@ import '../common/log.dart';
 import '../model/connect_error.dart';
 import '../model/enums.dart';
 
+/// Awaits [pending] for at most [limit], and does not leak the port if the
+/// open lands afterwards.
+///
+/// A function rather than inline at the one call site because there is no seam
+/// to fake `usbPlatform` behind - it is a top-level `final` built by
+/// `createUsbPlatform()` - so a test can hand this a `Completer` and watch
+/// both halves of the contract, where the same code inside
+/// `FlipperSession.establishLocked` would need a platform.
+///
+/// The late-arrival close is the half worth a test. A platform that answers
+/// after the deadline hands back a *live* transport nobody is holding, and on
+/// desktop that is an exclusively-opened serial port - so dropping the future
+/// would strand the port for the life of the process and make the next
+/// attempt fail with "access is denied", which reads as a different fault
+/// entirely.
+///
+/// [describe] names what was being opened, for the error only. A callback so
+/// the string is not built on the path that does not throw.
+Future<Transport> openWithin(
+  Future<Transport> pending,
+  Duration limit,
+  String Function() describe,
+) {
+  return pending.timeout(
+    limit,
+    onTimeout: () {
+      pending.then(
+        (transport) {
+          Log.warn(
+            '[FlipperClient] USB open answered after '
+            '${limit.inSeconds}s; closing the port nobody holds',
+          );
+          return transport.close();
+        },
+        // The open failing after the deadline is the ordinary case, and
+        // this future has no other listener - so swallowing here is what
+        // keeps it off the zone, not an error being dropped.
+        onError: (Object _, StackTrace _) {},
+      ).ignore();
+      throw FlipperUsbOpenUnansweredError(describe(), limit);
+    },
+  );
+}
+
 class FlipperTransportError implements Exception {
   final String message;
 

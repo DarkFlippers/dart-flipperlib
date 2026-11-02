@@ -130,7 +130,21 @@ class FlipperSession {
     );
     Transport? transport;
     try {
-      transport = await _client.openTransport(device);
+      // Bounded for USB only. A BLE connect is already bounded a layer up
+      // (`connectBleAddress`) and a scanned one is deliberately not - it can
+      // be sitting in a PIN prompt, which is a person answering, and
+      // `abortConnectInFlight` can cancel it. Neither is true of a cable:
+      // nothing bounded it and nothing could cancel it, so an answer that
+      // never came held this session and everything queued behind it for the
+      // life of the process.
+      final opening = _client.openTransport(device);
+      transport = device.isUsb
+          ? await openWithin(
+              opening,
+              FlipperClient.usbOpenTimeout,
+              () => '${device.name} (${device.link.name}:${device.id})',
+            )
+          : await opening;
       await transport.open();
     } catch (error) {
       _linkPhase = LinkPhase.disconnected;
