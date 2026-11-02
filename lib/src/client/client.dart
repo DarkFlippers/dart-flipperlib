@@ -9,6 +9,7 @@ import '../../protobuf.dart';
 import '../common/log.dart';
 import '../model/connect_error.dart';
 import '../model/device.dart';
+import '../model/device_id.dart';
 import '../model/discovered.dart';
 import '../model/enums.dart';
 import '../model/exceptions.dart';
@@ -865,11 +866,34 @@ class FlipperClient {
     String? name,
     Duration timeout = bleAddressConnectTimeout,
   }) async {
-    final known = _devices['${FlipperLink.ble.name}:$address'];
+    // Canonical before anything keys or compares on it. Unlike a scanned
+    // device, this id did not come from the plugin: it came out of the
+    // caller's own store, and in qUnleashed's case out of one written by a
+    // build that ran universal_ble 2.x - which upper-cased MACs on Android
+    // and reported Apple's peer UUID as its upper-case `uuidString`, so this
+    // is not an Android-only migration.
+    //
+    // From 3.0.0 the plugin emits lower-case on every native platform, and
+    // the connect itself would still work - the native side converts back at
+    // its boundary - so what an uncanonical id breaks is everything that
+    // compares afterwards: the device cache keyed below, and then the
+    // transport registering its callback dispatch under one spelling while
+    // every connection and value event for the link arrives under the other
+    // and matches nothing. See [canonicalBleDeviceId].
+    //
+    // This is the only entry here that canonicalises, not the only one that
+    // could want to: `isDeviceConnected`, `activateById` and
+    // `disconnectDevice` all compare a caller's id with `!=` through
+    // `_findSession`, and `disconnectDevice` answers a miss by returning
+    // normally. Nothing reaches them with an uncanonical id today - the host
+    // canonicalises what it stores - and making that boundary uniform is its
+    // own change.
+    final id = canonicalBleDeviceId(address);
+    final known = _devices['${FlipperLink.ble.name}:$id'];
     final device =
         known ??
         _fromDiscovered(
-          BleDiscoveredDevice(uble.BleDevice(deviceId: address, name: name)),
+          BleDiscoveredDevice(uble.BleDevice(deviceId: id, name: name)),
         );
     await _awaitBleAvailable(bleAvailabilityWait);
     try {
@@ -877,9 +901,9 @@ class FlipperClient {
       _rememberDevice(connected);
       return connected;
     } on TimeoutException {
-      await disconnectDevice(address, link: FlipperLink.ble);
+      await disconnectDevice(id, link: FlipperLink.ble);
       throw FlipperTransportError(
-        'BLE connect to $address timed out after ${timeout.inSeconds}s',
+        'BLE connect to $id timed out after ${timeout.inSeconds}s',
       );
     }
   }

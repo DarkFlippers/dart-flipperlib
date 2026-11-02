@@ -7,6 +7,14 @@ import '../../common/log.dart';
 import 'gatt.dart';
 
 abstract class BleOps {
+  /// Whether [requestMtu] can only answer once the services are known.
+  ///
+  /// A capability rather than an operation, and here rather than on the
+  /// transport because it is a fact about the plugin, and this is the one file
+  /// that is allowed to know those. [UniversalBleOps] reads the plugin's own
+  /// predicate; a fake answers for the platform it stands in for.
+  bool get mtuNeedsDiscovery;
+
   set onConnectionChange(
     void Function(String deviceId, bool isConnected, String? error)? cb,
   );
@@ -57,17 +65,55 @@ abstract class BleOps {
   Future<BleConnState?> getConnectionState(String deviceId);
 }
 
+/// [BleOps] over universal_ble itself: the only file that touches the
+/// plugin's *per-link* callbacks. (`onScanResult` is the exception, set and
+/// cleared inside `_scanBleLocked` in `client.dart`; 3.0.0 left its signature
+/// alone.)
+///
+/// That is what made universal_ble 3.0.0's two breaking callback changes a
+/// two-line edit. It collapsed `onConnectionChange`'s three positional
+/// arguments into one `BleConnectionChange` and `onValueChange`'s four into a
+/// `BleCharacteristicValue`; [BleOps] keeps the positional shape, so the
+/// destructuring stops here and `link.dart`, the fakes in `ble_fixtures.dart`
+/// and every test above them were untouched by the bump.
 class UniversalBleOps implements BleOps {
+  /// The plugin's own answer, not ours.
+  ///
+  /// `BleCapabilities.mtuRequiresServiceDiscovery` is iOS, macOS and Linux in
+  /// universal_ble 3.2.0, which is exactly what the three platform transports
+  /// used to declare for themselves - and a copied fact goes stale without a
+  /// compile error or a failing test. The cost of this one going stale was
+  /// measured: it is two service discoveries per connect, which is what #444
+  /// fixed. Reading it is free, unlike `canonicalDeviceId` - it looks at
+  /// `kIsWeb` and `defaultTargetPlatform` and touches no backend.
+  @override
+  bool get mtuNeedsDiscovery =>
+      uble.BleCapabilities.mtuRequiresServiceDiscovery;
+
   @override
   set onConnectionChange(void Function(String, bool, String?)? cb) {
     uble.UniversalBle.onConnectionChange = cb == null
         ? null
-        : (did, conn, err) => cb(did, conn, err?.toString());
+        // `error` is the platform's own sentence, and it already was in
+        // 2.x: `OnConnectionChange` declared `String? error` as far back as
+        // 1.2.0, so the `err?.toString()` this replaces was a no-op. What
+        // 3.0.0 changed is only that it arrives on an object. The two fields
+        // that came with it, `errorCode` and `nativeErrorCode`, are dropped
+        // here - `classifyConnectError` still reads the sentence - which is
+        // #436's business and not a bump's.
+        : (change) => cb(change.deviceId, change.isConnected, change.error);
   }
 
   @override
   set onValueChange(void Function(String, String, Uint8List, int?)? cb) {
-    uble.UniversalBle.onValueChange = cb;
+    uble.UniversalBle.onValueChange = cb == null
+        ? null
+        : (value) => cb(
+            value.deviceId,
+            value.characteristicId,
+            value.value,
+            value.timestamp,
+          );
   }
 
   @override

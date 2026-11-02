@@ -23,18 +23,38 @@ dependencies:
   # `org.bluez` before letting the plugin's backend touch it, and a package a
   # file imports by name is a dependency it declares. Pure Dart, so importing
   # it costs nothing on the four platforms that never call it.
-  dbus: ^0.7.12
+  #
+  # The floor follows `bluez`, which universal_ble 3.1.1 moved to `^0.9.0`:
+  # that release asks for `dbus: ^0.8.0`, so a constraint below it cannot
+  # resolve alongside the plugin. 0.8.0 is a major by version alone - it adds
+  # anonymous client authentication and uses records in its code generator -
+  # and leaves `DBusClient.system`, `startServiceByName` and `close` exactly
+  # as `transport/ble/linux.dart` already calls them.
+  dbus: ^0.8.0
   ffi: ^2.1.3
   fixnum: ^1.1.1
   flutter_libserialport: ^0.6.0
   protobuf: ^6.0.0
-  # The floor is a crash, not a feature. Through 2.1.1 the Windows
-  # WriteValueAsync completion handler reached GetResults() on a cancelled
-  # operation and let the hresult_error escape onto a WinRT thread-pool
-  # thread, where terminate -> abort took the process with it - so a link
-  # that died under _sendMessage killed the host app outright. 2.2.0 wrapped
-  # that handler and stopped capturing its strings by reference.
-  universal_ble: ^2.3.0
+  # The floor is a crash, not a feature, and 3.x is here for one the host
+  # app runs into by construction: through 2.x the plugin's GATT client cache
+  # was process-wide, so a connect from one FlutterEngine could short-circuit
+  # on a client a destroyed engine created and hand back a connection that
+  # reported connected and whose service discovery came back empty. qUnleashed
+  # runs two engines - `main()` and the headless `widgetMain()` - and that is
+  # the path nobody runs locally. 3.0.0 keeps the cache per engine.
+  #
+  # The floor is 3.2.0 rather than 3.0.0 for three more, all of them Windows:
+  # 3.1.1 compiles the plugin with `/utf-8`, without which a clean build fails
+  # on a machine whose ANSI code page is 936/932/949/950; 3.1.2 stops a failed
+  # connect - the device dropping the link mid-discovery, which is what a
+  # Flipper rebooting does - from freezing the app window; and 3.2.0 itself
+  # opens with "Fix Windows compilation", which is why the floor is not 3.1.2.
+  #
+  # What 3.0.0 broke and where it is absorbed: the two callback signatures in
+  # `transport/ble/ops.dart`, the `QueueType` default in
+  # `transport/ble/ble.dart`, and lower-case device ids in
+  # [canonicalBleDeviceId] (`model/device_id.dart`).
+  universal_ble: ^3.2.0
   usb_serial: ^0.5.2
 
 dev_dependencies:

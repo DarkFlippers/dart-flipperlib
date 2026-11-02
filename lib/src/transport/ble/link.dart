@@ -73,17 +73,34 @@ abstract class UniversalBleTransportBase extends Transport {
   static final Map<String, UniversalBleTransportBase> _liveByDevice = {};
 
   void _registerDispatch() {
-    _liveByDevice[_device.device.deviceId] = this;
+    _liveByDevice[_device.id] = this;
     _ops.onConnectionChange = _dispatchConnectionChange;
     _ops.onValueChange = _dispatchValueChange;
   }
 
+  // A miss is a no-op, and that is now a statement about identity rather than
+  // a shrug. Both sides of this lookup are canonical by construction - the key
+  // is [BleDiscoveredDevice.id], the query is the id universal_ble emits, and
+  // `canonicalBleDeviceId` is what makes those the same string - so the only
+  // way to miss is an event for a transport that is no longer registered,
+  // which is ordinary after a teardown and has nothing to report.
+  //
+  // It was not always a statement. #444 was a *live* transport registered
+  // under one spelling of an id the plugin emits in another, and then this
+  // silence was the whole of the failure: a link that connects, discovers,
+  // subscribes and receives nothing, the log simply stopping after service
+  // discovery with no `[BLE] disconnect diagnostics` line to say it dropped.
+  // The first fix for that was a warning here. It was the wrong altitude - it
+  // reported a mismatch instead of preventing one, and with two sessions the
+  // trailing events of a link that just closed would have spent its latch on
+  // false positives. Canonicalising the key is what makes the mismatch
+  // unreachable; `ble_connect_address_test.dart` pins it.
   static void _dispatchConnectionChange(
     String deviceId,
     bool isConnected,
     String? error,
   ) {
-    _liveByDevice[deviceId]?._onConnectionChange(deviceId, isConnected, error);
+    _liveByDevice[deviceId]?._onConnectionChange(isConnected, error);
   }
 
   static void _dispatchValueChange(
@@ -92,7 +109,7 @@ abstract class UniversalBleTransportBase extends Transport {
     Uint8List value,
     int? timestamp,
   ) {
-    _liveByDevice[deviceId]?._onValueChange(deviceId, charId, value, timestamp);
+    _liveByDevice[deviceId]?._onValueChange(charId, value, timestamp);
   }
 
   // Aborts whatever platform connect is currently in flight, if any. Lets a
@@ -217,19 +234,34 @@ abstract class UniversalBleTransportBase extends Transport {
   /// a platform declares rather than a method it overrides.
   Duration get connectSettle => Duration.zero;
 
-  /// Whether this platform's MTU is worth reading again after service
-  /// discovery.
+  /// Whether this platform's MTU is only knowable after service discovery.
   ///
-  /// True only where the platform negotiates on the link's behalf and reports
-  /// whatever it has so far - CoreBluetooth. Declared rather than inferred from
-  /// the first reading: inferring it from "did we already saturate the clamp"
-  /// reads as "is this Android", and an Android link that settles *below* the
-  /// firmware ceiling then takes the re-read it was meant to be spared. That
-  /// case is real - on Android 14+ the first GATT client fixes the MTU, so a
-  /// second app can leave ours smaller - and the cost is not a round trip but
-  /// up to ten seconds of the package's *global* command queue, with this
-  /// link's subscribes stuck behind it.
-  bool get mtuSettlesAfterDiscovery => false;
+  /// True where the platform does not answer from the connection itself:
+  /// CoreBluetooth negotiates on the link's behalf and reports whatever it has
+  /// so far, and BlueZ reads the figure off the resolved characteristics.
+  /// False on Android and Windows, where the MTU is a property of the
+  /// connection and is available immediately.
+  ///
+  /// It decides both reads in [configureConnected], and the second of those is
+  /// newer than this doc. Asking *before* discovery on a platform that cannot
+  /// answer yet was free until universal_ble 3.0.0; from 3.0.0 `requestMtu`
+  /// discovers the services itself when they are not known, so the early ask
+  /// on exactly these platforms buys the same useless figure as before and now
+  /// pays a whole service discovery for it - which the library then repeats,
+  /// because `UniversalBle.discoverServices` only short-circuits a discovery
+  /// that is still in flight, not one that has finished. Two discoveries per
+  /// connect, on every auto-reconnect cycle too. So: ask before discovery only
+  /// where the answer is real, and after it only where it was not.
+  ///
+  /// Answered by the plugin through [BleOps.mtuNeedsDiscovery], because it is
+  /// a fact about the plugin and not about this library. It was three
+  /// hard-coded `=> true` overrides - iOS, macOS, Linux - which is the same
+  /// set the plugin reports today and a copy that would go stale silently.
+  ///
+  /// Still a getter rather than a read at the call site: a transport that
+  /// wants to answer for a platform it stands in for overrides this, which is
+  /// what `ble_mtu_settle_test.dart` does.
+  bool get mtuSettlesAfterDiscovery => _ops.mtuNeedsDiscovery;
 
   // Platform hook that runs after all subscriptions are in place.
   Future<void> openExtra() async {
@@ -249,14 +281,14 @@ abstract class UniversalBleTransportBase extends Transport {
     final pairing = _pairingAbort;
     if (pairing != null && !pairing.isCompleted) pairing.complete();
     unawaited(
-      _ops.disconnect(_device.device.deviceId).catchError((Object e) {
+      _ops.disconnect(_device.id).catchError((Object e) {
         Log.error('[BLE] abort-connect cancel failed: $e');
       }),
     );
   }
 
   Future<void> configure() async {
-    final deviceId = _device.device.deviceId;
+    final deviceId = _device.id;
     final connectAttempt = ++_connectAttemptGen;
     _connectionOwner = this;
     var aborted = false;
@@ -318,6 +350,16 @@ abstract class UniversalBleTransportBase extends Transport {
     }
   }
 
+  // The outer bound matters more since universal_ble 3.0.0 than it did
+  // before. On Apple and Linux `requestMtu` now discovers services on demand
+  // before answering - where Apple used to report the unnegotiated 23 as if
+  // it were settled and Linux used to fail outright with
+  // `operationNotSupported` - and the plugin bounds each step separately, so
+  // a call that has to discover first can take up to twice that inside the
+  // plugin. Nothing here passes a `timeout`, so each of those steps gets
+  // universal_ble 3.2.0's own default of 10 s, against the 15 s below: this
+  // bound is reachable, and a timeout here is caught and falls back to the
+  // figure already held (see [applyMtu]).
   Future<int> _requestMtu(String deviceId) =>
       _ops.requestMtu(deviceId, _requestedMtu).timeout(_gattOpTimeout);
 
@@ -337,20 +379,32 @@ abstract class UniversalBleTransportBase extends Transport {
   /// from its service cache without fresh ATT traffic at all. If a link ever
   /// still reports 23 here, the slow-link warning below is what says so.
   ///
-  /// Takes the new reading rather than the larger of the two, because this also
-  /// runs after a pairing reconnect, where the previous link's figure is not
-  /// just stale but dangerous: a payload above the new link's ATT MTU is
-  /// silently promoted to a long write, which this firmware handles far worse
-  /// than more short ones. [maxBleMtuSize] bounds it from above for the same
-  /// reason.
-  /// [sameLink] says whether the figure already held was measured on the link
-  /// being read now. It decides what a failed read falls back to: the previous
-  /// reading when it belongs to this link, and the 23-byte floor when it does
-  /// not. Falling back across links is the hazard this method exists to avoid -
-  /// a payload sized for a larger previous link is promoted to a long write on
-  /// a smaller new one.
-  Future<void> _applyMtu(String deviceId, {required bool sameLink}) async {
-    if (!sameLink) _negotiatedMtu = _unnegotiatedMtu;
+  /// universal_ble 3.0.0 weakened that premise rather than retiring it. On
+  /// Apple `requestMtu` now discovers services on demand before answering,
+  /// so the earlier read in [configureConnected] is no longer taken before
+  /// any ATT traffic has happened. What has not changed is why the re-read
+  /// cannot be dropped: CoreBluetooth still gives no completion signal for
+  /// the MTU exchange, a reconnect can still be served from the service cache
+  /// without fresh traffic, and this also runs after a pairing reconnect,
+  /// where the figure held belongs to the previous link.
+  ///
+  /// Takes the new reading rather than the larger of the two, and drops the
+  /// figure already held before it reads: both calls to this are the first
+  /// read on the link in front of it - one after discovery, one after a
+  /// pairing reconnect - so anything held is the *previous* link's, and that
+  /// is not just stale but dangerous. A payload above the new link's ATT MTU
+  /// is silently promoted to a long write, which this firmware handles far
+  /// worse than more short ones; [maxBleMtuSize] bounds it from above for the
+  /// same reason. So a failed read falls back to the 23-byte floor, never
+  /// across links.
+  ///
+  /// It took a `sameLink` flag until #444, for the one caller that read the
+  /// MTU twice on one link - the pre-discovery ask that platform now makes
+  /// into a service discovery, and which [configureConnected] no longer makes
+  /// where it cannot be answered.
+  @visibleForTesting
+  Future<void> applyMtu(String deviceId) async {
+    _negotiatedMtu = _unnegotiatedMtu;
     try {
       _negotiatedMtu = await _requestMtu(deviceId);
     } catch (e) {
@@ -379,12 +433,19 @@ abstract class UniversalBleTransportBase extends Transport {
 
   Future<void> configureConnected(String deviceId) async {
     // Android grants the MTU when asked, and wants asking before the traffic
-    // that benefits - discovery included. Apple ignores the request and reports
-    // whatever it has so far, which is why _applyMtu reads it again below.
-    try {
-      _negotiatedMtu = await _requestMtu(deviceId);
-    } catch (e) {
-      Log.error('[BLE] requestMtu failed: $e (using default $_negotiatedMtu)');
+    // that benefits - discovery included. Apple and Linux cannot answer yet,
+    // and since universal_ble 3.0.0 being asked makes them discover the
+    // services to find out: the figure is the same unnegotiated one as before
+    // and the call costs a discovery the library is about to make itself. They
+    // are read below instead. See [mtuSettlesAfterDiscovery].
+    if (!mtuSettlesAfterDiscovery) {
+      try {
+        _negotiatedMtu = await _requestMtu(deviceId);
+      } catch (e) {
+        Log.error(
+          '[BLE] requestMtu failed: $e (using default $_negotiatedMtu)',
+        );
+      }
     }
 
     // Every GATT step is bounded: a platform stack that never answers (a
@@ -470,15 +531,15 @@ abstract class UniversalBleTransportBase extends Transport {
     _rxCharId = rxChar!;
     _txWithResponse = txWithResponse;
     _rxUsesIndicate = rxUsesIndicate;
-    // Only where the platform has a settled figure to give, and only when the
-    // first reading could still be improved on. Asking again is not free: on
-    // Android universal_ble's own note is that the first GATT client drives the
-    // MTU and "subsequent requests ignored", while its plugin parks the
-    // callback without checking the stack accepted the repeat - so a second ask
-    // can sit on the *global* command queue until it times out, holding this
-    // link's subscribes up behind it.
-    if (mtuSettlesAfterDiscovery && _negotiatedMtu - 3 < maxBleMtuSize) {
-      await _applyMtu(deviceId, sameLink: true);
+    // Only where the platform has a settled figure to give - which is also
+    // the only place the read above was skipped, so every link is read exactly
+    // once here. Asking twice is not free: on Android universal_ble's own note
+    // is that the first GATT client drives the MTU and "subsequent requests
+    // ignored", while its plugin parks the callback without checking the stack
+    // accepted the repeat - so a second ask can sit on the *global* command
+    // queue until it times out, holding this link's subscribes up behind it.
+    if (mtuSettlesAfterDiscovery) {
+      await applyMtu(deviceId);
     } else {
       bleMtuSize = (_negotiatedMtu - 3).clamp(_minBleMtuSize, maxBleMtuSize);
     }
@@ -508,7 +569,7 @@ abstract class UniversalBleTransportBase extends Transport {
     // The platform link is already up here (configure connected it).
     _link = BleLinkState.connected;
 
-    final deviceId = _device.device.deviceId;
+    final deviceId = _device.id;
     // First-time pairing reconnect loop. The encrypted setup below triggers the
     // system PIN prompt; on a never-bonded device the BLE link is frequently
     // dropped by the controller (supervision/pairing timeout, wasDisconnecting=
@@ -848,7 +909,7 @@ abstract class UniversalBleTransportBase extends Transport {
       // measured again. Keeping the old figure is not merely stale: if the new
       // link settles lower, every write sits above its ATT MTU and is promoted
       // to a long write.
-      await _applyMtu(deviceId, sameLink: false);
+      await applyMtu(deviceId);
       _link = BleLinkState.connected;
       return true;
     }
@@ -887,8 +948,11 @@ abstract class UniversalBleTransportBase extends Transport {
     }
   }
 
-  void _onConnectionChange(String deviceId, bool isConnected, String? error) {
-    if (deviceId != _device.device.deviceId) return;
+  // No id check: the dispatcher above selects by map key, so an instance
+  // that was reached is an instance whose id matched. The check that used to
+  // be here could not fire, and reading as though it could is what made #444
+  // look handled - the drop was the map miss, one level up.
+  void _onConnectionChange(bool isConnected, String? error) {
     if (isConnected) return;
     final wasDisconnecting = _link == BleLinkState.disconnecting;
     final platformError = error?.trim();
@@ -992,13 +1056,8 @@ abstract class UniversalBleTransportBase extends Transport {
     return 'UNCLASSIFIED (see rawError)';
   }
 
-  void _onValueChange(
-    String deviceId,
-    String charId,
-    Uint8List value,
-    int? timestamp,
-  ) {
-    if (deviceId != _device.device.deviceId) return;
+  // See [_onConnectionChange] on the id check that is not here.
+  void _onValueChange(String charId, Uint8List value, int? timestamp) {
     final lower = charId.toLowerCase();
     if (lower == _rxCharIdLower) {
       addBytes(value);
@@ -1270,7 +1329,7 @@ abstract class UniversalBleTransportBase extends Transport {
         // watchdog, which runs in this same loop) would hang forever.
         await _ops
             .write(
-              _device.device.deviceId,
+              _device.id,
               _txSvcId,
               _txCharId,
               Uint8List.sublistView(data, offset, chunkEnd),
@@ -1365,7 +1424,7 @@ abstract class UniversalBleTransportBase extends Transport {
     if (!identical(_connectionOwner, this)) {
       Log.info(
         '[BLE] stale transport closed without platform disconnect '
-        '(newer transport owns ${_device.device.deviceId})',
+        '(newer transport owns ${_device.id})',
       );
       _markBleDisconnected();
       _clearBleCallbacks();
@@ -1383,7 +1442,7 @@ abstract class UniversalBleTransportBase extends Transport {
       // open() failed mid-setup): release it without the graceful confirmation
       // wait — there is no live session to drain.
       try {
-        await _ops.disconnect(_device.device.deviceId);
+        await _ops.disconnect(_device.id);
       } catch (e) {
         Log.error('[BLE] disconnect failed: $e');
       }
@@ -1393,14 +1452,14 @@ abstract class UniversalBleTransportBase extends Transport {
     }
     _link = BleLinkState.disconnecting;
     final disconnectSignal = _disconnectSignal = Completer<void>();
-    final state = await _ops.getConnectionState(_device.device.deviceId);
+    final state = await _ops.getConnectionState(_device.id);
     if (state == BleConnState.disconnected) {
       _markBleDisconnected();
       _clearBleCallbacks();
       return;
     }
     try {
-      await _ops.disconnect(_device.device.deviceId);
+      await _ops.disconnect(_device.id);
     } catch (e) {
       Log.error('[BLE] disconnect failed: $e');
       _markBleDisconnected();
@@ -1432,7 +1491,7 @@ abstract class UniversalBleTransportBase extends Transport {
   }
 
   void _clearBleCallbacks() {
-    final deviceId = _device.device.deviceId;
+    final deviceId = _device.id;
     if (identical(_liveByDevice[deviceId], this)) {
       _liveByDevice.remove(deviceId);
     }

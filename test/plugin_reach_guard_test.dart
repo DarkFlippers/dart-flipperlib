@@ -37,7 +37,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// The members of `UniversalBle` whose Linux implementation awaits
 /// `_ensureInitialized()`, and so can be the first touch that orphans a
-/// rejection. Read out of universal_ble 2.3.0's
+/// rejection. Read out of universal_ble 3.2.0's
 /// `universal_ble_linux/universal_ble_linux.dart`.
 ///
 /// All seven, not just the one that was reported: any of them reached first on
@@ -46,6 +46,14 @@ import 'package:flutter_test/flutter_test.dart';
 /// backend's `connect` resolves the device and does not initialise — and that
 /// is a fact about the pinned plugin version, which is why the version is
 /// named above.
+///
+/// Re-derived on the 2.3.0 → 3.2.0 bump (#444) and unchanged: the same seven
+/// members await it, `connect` still only resolves the device, and
+/// `availabilityStream`'s `onListen` still reads availability. The thing the
+/// bump did *not* change is why any of this is here - 3.2.0's
+/// `_ensureInitialized` still answers a failure by completing a completer
+/// nobody listens to and never nulling it, so one failed touch is still one
+/// orphaned rejection and a backend that is dead for the life of the process.
 const _initialisingMembers = <String, List<String>>{
   'getBluetoothAvailabilityState': ['lib/src/transport/ble/platform.dart'],
   'enableBluetooth': [],
@@ -138,31 +146,61 @@ void main() {
     }
   });
 
-  group('the gated calls sit after their gate, in the same method', () {
-    /// The text of one method body, brace-matched from its signature.
-    ///
-    /// Bounded on purpose. An earlier version of this group searched from the
-    /// signature to end of file, which meant "somewhere after this method
-    /// starts" - so moving a plugin call out into any later ungated method
-    /// kept it green, and the case claiming a call "left this method" could
-    /// not fail for that reason.
-    String bodyOf(String source, String signature) {
-      final at = source.indexOf(signature);
-      expect(at, isNot(-1), reason: '$signature was renamed or reshaped');
+  /// The text of one method body, brace-matched from its signature.
+  ///
+  /// Bounded on purpose. An earlier version of the group below searched from
+  /// the signature to end of file, which meant "somewhere after this method
+  /// starts" - so moving a plugin call out into any later ungated method kept
+  /// it green, and the case claiming a call "left this method" could not fail
+  /// for that reason.
+  ///
+  /// In `main`'s scope rather than one group's because two groups now read a
+  /// method body. One copy, deliberately: #337 is the issue about this file's
+  /// kind of helper existing in four and eleven copies.
+  String bodyOf(String source, String signature) {
+    final at = source.indexOf(signature);
+    expect(at, isNot(-1), reason: '$signature was renamed or reshaped');
 
-      var i = source.indexOf('{', at);
-      final open = i;
-      var depth = 0;
-      for (; i < source.length; i++) {
-        if (source[i] == '{') depth++;
-        if (source[i] == '}') {
-          depth--;
-          if (depth == 0) return source.substring(open, i + 1);
-        }
+    // The *body's* brace, which is not simply the first one after the
+    // signature: a named or optional parameter group opens a brace of its own
+    // inside the parameter list. This read `source.indexOf('{', at)` until
+    // #444 added a case on `connectBleAddress`, whose parameters are named -
+    // so the "body" was the parameter list, and an assertion about what the
+    // method does failed for a reason that had nothing to do with the method.
+    // The three signatures that were here already take positional parameters,
+    // which is why it held.
+    var open = at;
+    var parens = 0;
+    var entered = false;
+    for (; open < source.length; open++) {
+      final c = source[open];
+      if (c == '(') {
+        parens++;
+        entered = true;
+      } else if (c == ')') {
+        parens--;
+      } else if (c == '{' && entered && parens == 0) {
+        break;
       }
-      fail('$signature has no matching closing brace');
     }
+    expect(
+      open,
+      lessThan(source.length),
+      reason: '$signature has no body brace',
+    );
 
+    var depth = 0;
+    for (var i = open; i < source.length; i++) {
+      if (source[i] == '{') depth++;
+      if (source[i] == '}') {
+        depth--;
+        if (depth == 0) return source.substring(open, i + 1);
+      }
+    }
+    fail('$signature has no matching closing brace');
+  }
+
+  group('the gated calls sit after their gate, in the same method', () {
     /// The gate, then the calls it protects.
     void expectGatedBy(String method, List<String> members) {
       final body = bodyOf(code['lib/src/client/client.dart']!, method);
@@ -276,10 +314,13 @@ void main() {
       // no controller cannot survive, and that is one deleted `if` away. This
       // is the arm that has to exist, not just precede.
       //
-      // Textual, and that is this guard's limit: the behavioural version wants
-      // `FlipperClient` to take its `BlePlatform` as a constructor parameter
-      // instead of reading the global, which is the target DI pattern (ADR
-      // 0002) and a wider change than the fix it would be testing.
+      // Textual, and that is this guard's limit - though a narrower
+      // behavioural version turns out to be reachable: `UniversalBle` exposes
+      // `setInstance`, so a fake platform answering `unsupported` with a
+      // counting `availabilityStream` can assert that nothing subscribed.
+      // `ble_connect_address_test.dart` uses that seam for the id. Writing
+      // this one is worth doing and is not part of the bump that found the
+      // seam.
       final body = bodyOf(
         code['lib/src/client/client.dart']!,
         'Future<void> _awaitBleAvailable(',
@@ -299,6 +340,76 @@ void main() {
         arm,
         lessThan(body.indexOf('UniversalBle.availabilityStream')),
         reason: 'the `unsupported` arm no longer precedes the subscription',
+      );
+    });
+  });
+
+  // Not about initialisation, and here for the one property this file's
+  // instrument has. The plugin's command queue is configured by a setter with
+  // no getter, and `BleCommandQueue` is not exported, so there is nothing a
+  // behavioural case can read back - which is the whole of why this one is
+  // text.
+  //
+  // The canonicalisation that arrived with the same bump is deliberately
+  // *not* here, and that is the distinction worth recording: it was, as a
+  // source assertion over `connectBleAddress`, and the assertion could not
+  // see a mutant that canonicalised and then built the `BleDevice` from the
+  // raw address anyway - #444 restored with the fix visibly present in the
+  // diff. `ble_connect_address_test.dart` asserts the id that comes out
+  // instead, through the real method, with the plugin replaced by
+  // `UniversalBle.setInstance`.
+  group('what universal_ble 3.x asks of the caller', () {
+    test('the callback dispatch is keyed by the canonical id', () {
+      // `_liveByDevice` is keyed at registration and looked up with the id
+      // universal_ble emits. Key it off `_device.device.deviceId` - the
+      // plugin's own spelling, which `BleDiscoveredDevice` deliberately does
+      // not fold - and a transport built from a caller's id is registered
+      // under a string no event will ever carry: #444 exactly, a link that
+      // connects, discovers, subscribes and receives nothing.
+      //
+      // Textual because there is no behavioural reach: `_registerDispatch` is
+      // called from `open()`, which no case in this suite drives (the one
+      // fake that gets that far discards both callback setters), and the map
+      // is a private static. The fold it depends on is behavioural, in
+      // `ble_device_id_test.dart`.
+      final body = bodyOf(
+        code['lib/src/transport/ble/link.dart']!,
+        'void _registerDispatch(',
+      );
+
+      expect(
+        body,
+        contains('_liveByDevice[_device.id]'),
+        reason:
+            'the callback dispatch is no longer keyed by the canonical id, so '
+            'an event for this link can arrive under a spelling the map does '
+            'not hold - and a miss there is a silent no-op.',
+      );
+    });
+
+    test('the plugin command queue is pinned, not inherited', () {
+      // 3.0.0 changed the default from `global` to `auto`, which is parallel
+      // on Apple and Windows. Nothing in this library switches on QueueType,
+      // so deleting the line costs no compile error and no test - it just
+      // changes what the plugin does with two GATT operations in flight on
+      // one link. `ble.dart` says why we are not taking that in a bump.
+      // In the initialiser's own body, not anywhere in the file: the
+      // setting and the fact that it runs are one assertion only because the
+      // statement is where it is. It was a one-line `_serialiseBleCommands()`
+      // helper, which took two expectations - one for the queue type, one for
+      // the call - because deleting the call left the setting behind, still
+      // matching a `contains` over the whole file.
+      expect(
+        bodyOf(
+          code['lib/src/transport/ble/ble.dart']!,
+          'BlePlatform _configuredBlePlatform(',
+        ),
+        contains('QueueType.global'),
+        reason:
+            'nothing on the way to `blePlatform` pins the command queue any '
+            'more, so it is whatever the pinned universal_ble defaults to - '
+            '`auto` since 3.0.0, which runs commands in parallel on Apple and '
+            'Windows.',
       );
     });
   });
