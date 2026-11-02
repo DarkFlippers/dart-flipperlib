@@ -37,6 +37,46 @@ const String transportClosedMessage = 'Transport closed';
 const String missingCharacteristicsMessage =
     'Missing Flipper BLE characteristics';
 
+/// What a USB open raises when the platform never answers it.
+///
+/// A constant for the same reason as the three above, though nothing matches
+/// on it: [FlipperUsbOpenUnansweredError] carries the fact by type and this is
+/// only the sentence a user-facing layer falls back to.
+const String usbOpenUnansweredMessage = 'The USB port did not answer';
+
+/// A USB open that was still outstanding when its deadline passed.
+///
+/// Typed, for the reason [FlipperServicesMissingError] is - the fact is read
+/// rather than re-parsed out of a sentence this library wrote one frame
+/// earlier - and because the alternative here is worse than usual: the
+/// classifier matches a bare `timeout` and `timed out`, so a plain
+/// `TimeoutException` would land under `deviceUnreachable` and tell somebody
+/// holding a cable to move closer to their Flipper.
+///
+/// Why this can happen at all, on Android: `usb_serial`'s `openDevice`
+/// completes its platform result only from the `ACTION_USB_PERMISSION`
+/// broadcast. A dismissed dialog does send a denial on AOSP, which is the
+/// common case and throws on its own - but nothing on the path put a deadline
+/// on an answer that never arrives, and `FlipperSession.abortConnectInFlight`
+/// cannot cancel a USB connect, so the session, the client's lifecycle chain
+/// and any consumer's reconcile loop were all held for as long as the app
+/// lived. qUnleashed made this reachable with no gesture behind it by
+/// auto-connecting to a cable at launch.
+///
+/// [device] is what was being opened and [limit] is the deadline that passed,
+/// both so a caller does not have to read them back out of the message.
+class FlipperUsbOpenUnansweredError implements Exception {
+  const FlipperUsbOpenUnansweredError(this.device, this.limit);
+
+  final String device;
+  final Duration limit;
+
+  @override
+  String toString() =>
+      '$usbOpenUnansweredMessage: $device did not open within '
+      '${limit.inSeconds}s';
+}
+
 /// A connected device that presented no Flipper service, or one without the
 /// characteristics the RPC runs over.
 ///
@@ -197,6 +237,18 @@ FlipperConnectErrorKind classifyConnectError(Object error) {
   // words arriving untyped.
   if (error is FlipperServicesMissingError) {
     return FlipperConnectErrorKind.servicesMissing;
+  }
+  // Joins the two USB strings the `bluetoothUnavailable` block below says it
+  // deliberately leaves to `unknown`, and for the same reason: `unknown` is
+  // the only kind carrying a USB sentence, and "unplug the device and plug it
+  // back in" is the right advice for a cable that never answered - on Android
+  // a replug is what raises the permission prompt again. A kind of its own was
+  // considered and is not worth a consumer's exhaustive switch plus a new
+  // translated string to say the same thing. Read by type, ahead of the
+  // `timeout` needles further down that would have called this a range
+  // problem.
+  if (error is FlipperUsbOpenUnansweredError) {
+    return FlipperConnectErrorKind.unknown;
   }
 
   final e = error.toString().toLowerCase();

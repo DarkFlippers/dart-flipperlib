@@ -168,6 +168,15 @@ class FlipperClient {
   // How long connectBleAddress waits before giving the radio back. Matches
   // flipper-android's own bound for a connect to a remembered device.
   static const Duration bleAddressConnectTimeout = Duration(seconds: 30);
+  // How long a USB open may stay outstanding before the session gives up on
+  // it. Longer than the BLE bound above, because this one can have a person
+  // in it: on Android the open does not complete until the USB permission
+  // broadcast arrives, and a user who is not looking at the phone when the
+  // dialog appears needs more than 30s to find it. Short enough that an
+  // answer which never comes does not cost the session - see
+  // `FlipperUsbOpenUnansweredError` for what that used to mean.
+  static const Duration usbOpenTimeout = Duration(seconds: 90);
+
   // How long connectBleAddress waits for the platform's BLE stack to come up
   // before dialling. A scan checks the adapter state itself and simply reports
   // nothing while it is down; a direct connect has no such step, and a cold
