@@ -22,6 +22,15 @@
 // knows nothing about *when* a call runs - so the ordering group at the bottom
 // exists because three of the four members flipperlib reaches are safe only by
 // the order of statements inside one method.
+//
+// It also knows nothing about the *host*. QUNLEASHED-C came back on a machine
+// with a radio and no BlueZ (#443) with every case here green, and that was
+// not a regression of this guard: every call was still in its allowed file and
+// still below its gate, and the gate itself was answering `delegate` for a
+// machine where delegating crashes. Whether a gate's answer covers a host is a
+// behavioural question and `ble_access_linux_test.dart` is where it is asked.
+// What this file gained from #443 is the one part that is textual - that the
+// Linux gate has both of its preconditions, in order, above the delegation.
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -187,6 +196,64 @@ void main() {
         );
       }
     }
+
+    test('the Linux gate asks both questions before it delegates', () {
+      // `LinuxBlePlatform.availabilityState` is the one gate that answers for
+      // a host rather than reading an adapter, and it has two preconditions
+      // because one of them was not enough: the kernel read cannot see a
+      // machine whose radio is listed and whose `org.bluez` does not exist,
+      // which is what QUNLEASHED-C was for three weeks after the first fix.
+      //
+      // Textual and in this file for the same reason the group's other cases
+      // are: the behavioural versions - that each precondition answers, and
+      // that neither reaches the plugin - are in
+      // `ble_access_linux_test.dart`. What is left over for text is the
+      // ordering, which no behavioural case can state without asserting that
+      // the cheaper read runs first for its own sake.
+      final body = bodyOf(
+        code['lib/src/transport/ble/linux.dart']!,
+        'Future<uble.AvailabilityState> availabilityState(',
+      );
+
+      final kernel = body.indexOf('hasAdapter()');
+      final bus = body.indexOf('canReachBlueZ()');
+      final delegate = body.indexOf('askPluginForAvailability()');
+
+      expect(
+        kernel,
+        isNot(-1),
+        reason: 'the kernel read is gone from the Linux availability gate',
+      );
+      expect(
+        bus,
+        isNot(-1),
+        reason:
+            'the Linux availability gate no longer asks the bus whether it can '
+            'produce org.bluez, so a host with a radio and no BlueZ delegates '
+            'and the backend orphans a rejection - which is QUNLEASHED-C.',
+      );
+      expect(
+        delegate,
+        isNot(-1),
+        reason: 'the Linux gate no longer delegates to the plugin at all',
+      );
+
+      expect(
+        kernel,
+        lessThan(bus),
+        reason:
+            'the bus read now runs before the kernel read, so a machine with '
+            'no radio pays for a socket, an auth handshake and a round trip to '
+            'be told what a stat already said.',
+      );
+      expect(
+        bus,
+        lessThan(delegate),
+        reason:
+            'the bus read no longer precedes the delegation, so it cannot be '
+            'what stops it. That is QUNLEASHED-C by the same door it came in.',
+      );
+    });
 
     test('the scan gates startScan and stopScan', () {
       // Neither is safe by construction. Move the read below the scan wiring,
