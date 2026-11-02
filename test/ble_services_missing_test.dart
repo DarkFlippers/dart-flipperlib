@@ -29,6 +29,12 @@ class _FakeOps implements BleOps {
 
   final List<BleService> services;
 
+  // Stands in for Android here, which answers the MTU off the connection: the
+  // read is taken before discovery, as it was before #444 moved it on the
+  // platforms that cannot answer that early.
+  @override
+  bool get mtuNeedsDiscovery => false;
+
   @override
   Future<int> requestMtu(String deviceId, int mtu) async => 185;
 

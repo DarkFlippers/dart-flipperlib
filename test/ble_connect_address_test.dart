@@ -58,12 +58,13 @@ void main() {
 
     final device = await client.connectBleAddress(stored, name: 'Flipper Zoe');
 
-    // All three, because the id has to be canonical in all three places and a
-    // fix that only canonicalises the cache key leaves the transport - and so
-    // the callback dispatch - on the caller's spelling.
-    expect(device.id, reported);
+    // One object, so one assertion: `connect` is handed the device this method
+    // built, returns it, and `_rememberDevice` stores that same instance. The
+    // id reaching `connect` is the one that matters - it is what the transport
+    // registers its callback dispatch under - and the cache key is the second
+    // case's subject.
     expect(client.handed.single.id, reported);
-    expect(client.devices.map((d) => d.id), [reported]);
+    expect(device.id, same(client.handed.single.id));
   });
 
   test('and the same stored spelling finds the live session again', () async {

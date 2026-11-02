@@ -73,19 +73,34 @@ abstract class UniversalBleTransportBase extends Transport {
   static final Map<String, UniversalBleTransportBase> _liveByDevice = {};
 
   void _registerDispatch() {
-    _liveByDevice[_device.device.deviceId] = this;
+    _liveByDevice[_device.id] = this;
     _ops.onConnectionChange = _dispatchConnectionChange;
     _ops.onValueChange = _dispatchValueChange;
   }
 
+  // A miss is a no-op, and that is now a statement about identity rather than
+  // a shrug. Both sides of this lookup are canonical by construction - the key
+  // is [BleDiscoveredDevice.id], the query is the id universal_ble emits, and
+  // `canonicalBleDeviceId` is what makes those the same string - so the only
+  // way to miss is an event for a transport that is no longer registered,
+  // which is ordinary after a teardown and has nothing to report.
+  //
+  // It was not always a statement. #444 was a *live* transport registered
+  // under one spelling of an id the plugin emits in another, and then this
+  // silence was the whole of the failure: a link that connects, discovers,
+  // subscribes and receives nothing, the log simply stopping after service
+  // discovery with no `[BLE] disconnect diagnostics` line to say it dropped.
+  // The first fix for that was a warning here. It was the wrong altitude - it
+  // reported a mismatch instead of preventing one, and with two sessions the
+  // trailing events of a link that just closed would have spent its latch on
+  // false positives. Canonicalising the key is what makes the mismatch
+  // unreachable; `ble_connect_address_test.dart` pins it.
   static void _dispatchConnectionChange(
     String deviceId,
     bool isConnected,
     String? error,
   ) {
-    final live = _liveByDevice[deviceId];
-    if (live == null) return _nothingClaims('connection', deviceId);
-    live._onConnectionChange(isConnected, error);
+    _liveByDevice[deviceId]?._onConnectionChange(isConnected, error);
   }
 
   static void _dispatchValueChange(
@@ -94,38 +109,7 @@ abstract class UniversalBleTransportBase extends Transport {
     Uint8List value,
     int? timestamp,
   ) {
-    final live = _liveByDevice[deviceId];
-    if (live == null) return _nothingClaims('value', deviceId);
-    live._onValueChange(charId, value, timestamp);
-  }
-
-  /// Says that an event arrived for a device no live transport claims.
-  ///
-  /// This dispatch used to be `_liveByDevice[deviceId]?.…`, where a miss is
-  /// not a branch at all: nothing runs, nothing is counted, nothing is logged,
-  /// in any build. That was sound while the only way to miss was a transport
-  /// that had already torn down - which is still the ordinary case and still
-  /// says nothing here.
-  ///
-  /// #444 made a *live* transport miss possible: registered under one spelling
-  /// of an id that universal_ble 3.0.0 emits in another. The silence was then
-  /// the whole of the failure - a link that connects, discovers, subscribes
-  /// and receives nothing, with the log simply stopping after service
-  /// discovery and no `[BLE] disconnect diagnostics` line to say it dropped.
-  /// A map holding live transports that did not match is the one case worth a
-  /// line, and it names both spellings, which is what nothing did.
-  ///
-  /// `warnOnce`, because value events arrive at notification rate and an
-  /// unlatched line here is a log burst that costs the errors around it.
-  static void _nothingClaims(String what, String deviceId) {
-    if (_liveByDevice.isEmpty) return;
-    Log.warnOnce(
-      'ble/dispatch-miss-$what',
-      '[BLE] $what event for $deviceId matched no live transport '
-          '(holding ${_liveByDevice.keys.join(', ')})',
-      cause: deviceId,
-      causes: 2,
-    );
+    _liveByDevice[deviceId]?._onValueChange(charId, value, timestamp);
   }
 
   // Aborts whatever platform connect is currently in flight, if any. Lets a
@@ -269,14 +253,15 @@ abstract class UniversalBleTransportBase extends Transport {
   /// connect, on every auto-reconnect cycle too. So: ask before discovery only
   /// where the answer is real, and after it only where it was not.
   ///
-  /// Declared rather than inferred from the first reading: inferring it from
-  /// "did we already saturate the clamp" reads as "is this Android", and an
-  /// Android link that settles *below* the firmware ceiling then takes a
-  /// re-read it was meant to be spared. That case is real - on Android 14+ the
-  /// first GATT client fixes the MTU, so a second app can leave ours smaller -
-  /// and the cost is not a round trip but up to ten seconds of the package's
-  /// *global* command queue, with this link's subscribes stuck behind it.
-  bool get mtuSettlesAfterDiscovery => false;
+  /// Answered by the plugin through [BleOps.mtuNeedsDiscovery], because it is
+  /// a fact about the plugin and not about this library. It was three
+  /// hard-coded `=> true` overrides - iOS, macOS, Linux - which is the same
+  /// set the plugin reports today and a copy that would go stale silently.
+  ///
+  /// Still a getter rather than a read at the call site: a transport that
+  /// wants to answer for a platform it stands in for overrides this, which is
+  /// what `ble_mtu_settle_test.dart` does.
+  bool get mtuSettlesAfterDiscovery => _ops.mtuNeedsDiscovery;
 
   // Platform hook that runs after all subscriptions are in place.
   Future<void> openExtra() async {
@@ -296,14 +281,14 @@ abstract class UniversalBleTransportBase extends Transport {
     final pairing = _pairingAbort;
     if (pairing != null && !pairing.isCompleted) pairing.complete();
     unawaited(
-      _ops.disconnect(_device.device.deviceId).catchError((Object e) {
+      _ops.disconnect(_device.id).catchError((Object e) {
         Log.error('[BLE] abort-connect cancel failed: $e');
       }),
     );
   }
 
   Future<void> configure() async {
-    final deviceId = _device.device.deviceId;
+    final deviceId = _device.id;
     final connectAttempt = ++_connectAttemptGen;
     _connectionOwner = this;
     var aborted = false;
@@ -553,7 +538,6 @@ abstract class UniversalBleTransportBase extends Transport {
     // ignored", while its plugin parks the callback without checking the stack
     // accepted the repeat - so a second ask can sit on the *global* command
     // queue until it times out, holding this link's subscribes up behind it.
-    //
     if (mtuSettlesAfterDiscovery) {
       await applyMtu(deviceId);
     } else {
@@ -585,7 +569,7 @@ abstract class UniversalBleTransportBase extends Transport {
     // The platform link is already up here (configure connected it).
     _link = BleLinkState.connected;
 
-    final deviceId = _device.device.deviceId;
+    final deviceId = _device.id;
     // First-time pairing reconnect loop. The encrypted setup below triggers the
     // system PIN prompt; on a never-bonded device the BLE link is frequently
     // dropped by the controller (supervision/pairing timeout, wasDisconnecting=
@@ -1345,7 +1329,7 @@ abstract class UniversalBleTransportBase extends Transport {
         // watchdog, which runs in this same loop) would hang forever.
         await _ops
             .write(
-              _device.device.deviceId,
+              _device.id,
               _txSvcId,
               _txCharId,
               Uint8List.sublistView(data, offset, chunkEnd),
@@ -1440,7 +1424,7 @@ abstract class UniversalBleTransportBase extends Transport {
     if (!identical(_connectionOwner, this)) {
       Log.info(
         '[BLE] stale transport closed without platform disconnect '
-        '(newer transport owns ${_device.device.deviceId})',
+        '(newer transport owns ${_device.id})',
       );
       _markBleDisconnected();
       _clearBleCallbacks();
@@ -1458,7 +1442,7 @@ abstract class UniversalBleTransportBase extends Transport {
       // open() failed mid-setup): release it without the graceful confirmation
       // wait — there is no live session to drain.
       try {
-        await _ops.disconnect(_device.device.deviceId);
+        await _ops.disconnect(_device.id);
       } catch (e) {
         Log.error('[BLE] disconnect failed: $e');
       }
@@ -1468,14 +1452,14 @@ abstract class UniversalBleTransportBase extends Transport {
     }
     _link = BleLinkState.disconnecting;
     final disconnectSignal = _disconnectSignal = Completer<void>();
-    final state = await _ops.getConnectionState(_device.device.deviceId);
+    final state = await _ops.getConnectionState(_device.id);
     if (state == BleConnState.disconnected) {
       _markBleDisconnected();
       _clearBleCallbacks();
       return;
     }
     try {
-      await _ops.disconnect(_device.device.deviceId);
+      await _ops.disconnect(_device.id);
     } catch (e) {
       Log.error('[BLE] disconnect failed: $e');
       _markBleDisconnected();
@@ -1507,7 +1491,7 @@ abstract class UniversalBleTransportBase extends Transport {
   }
 
   void _clearBleCallbacks() {
-    final deviceId = _device.device.deviceId;
+    final deviceId = _device.id;
     if (identical(_liveByDevice[deviceId], this)) {
       _liveByDevice.remove(deviceId);
     }

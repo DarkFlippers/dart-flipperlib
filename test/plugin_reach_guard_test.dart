@@ -359,29 +359,57 @@ void main() {
   // instead, through the real method, with the plugin replaced by
   // `UniversalBle.setInstance`.
   group('what universal_ble 3.x asks of the caller', () {
+    test('the callback dispatch is keyed by the canonical id', () {
+      // `_liveByDevice` is keyed at registration and looked up with the id
+      // universal_ble emits. Key it off `_device.device.deviceId` - the
+      // plugin's own spelling, which `BleDiscoveredDevice` deliberately does
+      // not fold - and a transport built from a caller's id is registered
+      // under a string no event will ever carry: #444 exactly, a link that
+      // connects, discovers, subscribes and receives nothing.
+      //
+      // Textual because there is no behavioural reach: `_registerDispatch` is
+      // called from `open()`, which no case in this suite drives (the one
+      // fake that gets that far discards both callback setters), and the map
+      // is a private static. The fold it depends on is behavioural, in
+      // `ble_device_id_test.dart`.
+      final body = bodyOf(
+        code['lib/src/transport/ble/link.dart']!,
+        'void _registerDispatch(',
+      );
+
+      expect(
+        body,
+        contains('_liveByDevice[_device.id]'),
+        reason:
+            'the callback dispatch is no longer keyed by the canonical id, so '
+            'an event for this link can arrive under a spelling the map does '
+            'not hold - and a miss there is a silent no-op.',
+      );
+    });
+
     test('the plugin command queue is pinned, not inherited', () {
       // 3.0.0 changed the default from `global` to `auto`, which is parallel
       // on Apple and Windows. Nothing in this library switches on QueueType,
       // so deleting the line costs no compile error and no test - it just
       // changes what the plugin does with two GATT operations in flight on
       // one link. `ble.dart` says why we are not taking that in a bump.
-      final ble = code['lib/src/transport/ble/ble.dart']!;
+      // In the initialiser's own body, not anywhere in the file: the
+      // setting and the fact that it runs are one assertion only because the
+      // statement is where it is. It was a one-line `_serialiseBleCommands()`
+      // helper, which took two expectations - one for the queue type, one for
+      // the call - because deleting the call left the setting behind, still
+      // matching a `contains` over the whole file.
       expect(
-        ble,
+        bodyOf(
+          code['lib/src/transport/ble/ble.dart']!,
+          'BlePlatform _configuredBlePlatform(',
+        ),
         contains('QueueType.global'),
         reason:
-            'the command queue is no longer pinned to one queue, so it is '
-            'whatever the pinned universal_ble defaults to - `auto` since '
-            '3.0.0, which runs commands in parallel on Apple and Windows.',
-      );
-      // And that it runs. Asserting the setting alone let a mutant that
-      // deleted the call survive with the function still defined below it.
-      expect(
-        bodyOf(ble, 'BlePlatform _configuredBlePlatform('),
-        contains('_serialiseBleCommands()'),
-        reason:
-            'nothing on the way to `blePlatform` pins the queue any more, so '
-            'the setting is written down and never applied.',
+            'nothing on the way to `blePlatform` pins the command queue any '
+            'more, so it is whatever the pinned universal_ble defaults to - '
+            '`auto` since 3.0.0, which runs commands in parallel on Apple and '
+            'Windows.',
       );
     });
   });

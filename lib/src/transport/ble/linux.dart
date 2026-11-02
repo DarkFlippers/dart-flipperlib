@@ -503,14 +503,6 @@ class LinuxBleTransport extends UniversalBleTransportBase {
   LinuxBleTransport._(BleDiscoveredDevice device)
     : super(device, UniversalBleOps());
 
-  // BlueZ reads the MTU off the resolved characteristics, so there is nothing
-  // to ask before discovery - through universal_ble 2.x asking anyway failed
-  // with `operationNotSupported`, which is why this link had no MTU reading at
-  // all, and from 3.0.0 asking triggers a discovery to answer. Either way the
-  // read belongs after discovery, which is what this says.
-  @override
-  bool get mtuSettlesAfterDiscovery => true;
-
   static Future<LinuxBleTransport> create(BleDiscoveredDevice device) async {
     final transport = LinuxBleTransport._(device);
     await transport.configure();

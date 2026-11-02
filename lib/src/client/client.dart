@@ -9,6 +9,7 @@ import '../../protobuf.dart';
 import '../common/log.dart';
 import '../model/connect_error.dart';
 import '../model/device.dart';
+import '../model/device_id.dart';
 import '../model/discovered.dart';
 import '../model/enums.dart';
 import '../model/exceptions.dart';

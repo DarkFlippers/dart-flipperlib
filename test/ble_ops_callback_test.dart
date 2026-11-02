@@ -73,6 +73,26 @@ void main() {
     expect(timestamp, 1700);
   });
 
+  test('the MTU capability is the plugin\'s answer, not ours', () {
+    // It was three hard-coded `=> true` overrides on the Apple and Linux
+    // transports - the same set the plugin reports, and a copy that goes
+    // stale with no compile error and no failing test. The cost of this one
+    // going stale was measured at two service discoveries per connect.
+    //
+    // The limit of the case: `defaultTargetPlatform` is android here, where
+    // the plugin answers false, so a body hard-coded to `false` would pass
+    // it too. What it does catch is the inversion and a hard-coded `true`.
+    expect(
+      UniversalBleOps().mtuNeedsDiscovery,
+      uble.BleCapabilities.mtuRequiresServiceDiscovery,
+    );
+    expect(
+      uble.BleCapabilities.mtuRequiresServiceDiscovery,
+      isFalse,
+      reason: 'this host is not one of the platforms that needs discovery',
+    );
+  });
+
   test('the connection callback keeps the flag and the platform sentence', () {
     String? deviceId;
     bool? connected;

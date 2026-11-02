@@ -16,6 +16,7 @@ import 'package:flutter/services.dart' show ServicesBinding;
 
 import 'package:flipperlib/flipperlib.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:universal_ble/universal_ble.dart' as uble;
 
 void main() {
   group('the canonical device id', () {
@@ -72,6 +73,33 @@ void main() {
             'went back to asking the plugin would pass every case here',
       );
       expect(canonicalBleDeviceId('80:E1:27:AA:BB:CC'), '80:e1:27:aa:bb:cc');
+    });
+  });
+
+  group('a discovered device', () {
+    test('is canonical however it was built', () {
+      // The structural half, and the only case that reaches it: a scan result
+      // and `loadKnownDevices` arrive canonical from the plugin, and
+      // `connectBleAddress` canonicalises what it was handed before building
+      // one - so the fold here is what covers a consumer calling the exported
+      // `blePlatform.openTransport` with an id of its own. The transport keys
+      // its callback dispatch off this, which is where #444 landed.
+      final discovered = BleDiscoveredDevice(
+        uble.BleDevice(deviceId: '80:E1:27:AA:BB:CC', name: 'Flipper Zoe'),
+      );
+
+      expect(discovered.id, '80:e1:27:aa:bb:cc');
+    });
+
+    test('and hands the plugin back the spelling it gave', () {
+      // Deliberate: the plugin takes either case, and rewriting its own model
+      // would mean copying every field it carries by hand. Nothing in the
+      // library compares this one.
+      final discovered = BleDiscoveredDevice(
+        uble.BleDevice(deviceId: '80:E1:27:AA:BB:CC', name: 'Flipper Zoe'),
+      );
+
+      expect(discovered.device.deviceId, '80:E1:27:AA:BB:CC');
     });
   });
 }

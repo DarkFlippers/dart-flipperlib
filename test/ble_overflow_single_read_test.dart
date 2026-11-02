@@ -39,6 +39,12 @@ class _CountingOps implements BleOps {
 
   final subscribed = <String>[];
 
+  // Stands in for Android here, which answers the MTU off the connection: the
+  // read is taken before discovery, as it was before #444 moved it on the
+  // platforms that cannot answer that early.
+  @override
+  bool get mtuNeedsDiscovery => false;
+
   @override
   set onConnectionChange(void Function(String, bool, String?)? cb) {}
 

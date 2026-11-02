@@ -43,4 +43,8 @@
 /// `test/ble_device_id_test.dart` holds the line from the other side: it
 /// initialises no binding, so a body that went back to asking the plugin
 /// fails there rather than on a user's machine.
+///
+/// In `model/` rather than beside the BLE transport that needs it, because
+/// [BleDiscoveredDevice] applies it on construction and a model importing a
+/// transport is the wrong way round. Nothing here knows about a platform.
 String canonicalBleDeviceId(String id) => id.toLowerCase();

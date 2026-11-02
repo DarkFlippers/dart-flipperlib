@@ -7,6 +7,14 @@ import '../../common/log.dart';
 import 'gatt.dart';
 
 abstract class BleOps {
+  /// Whether [requestMtu] can only answer once the services are known.
+  ///
+  /// A capability rather than an operation, and here rather than on the
+  /// transport because it is a fact about the plugin, and this is the one file
+  /// that is allowed to know those. [UniversalBleOps] reads the plugin's own
+  /// predicate; a fake answers for the platform it stands in for.
+  bool get mtuNeedsDiscovery;
+
   set onConnectionChange(
     void Function(String deviceId, bool isConnected, String? error)? cb,
   );
@@ -69,6 +77,19 @@ abstract class BleOps {
 /// destructuring stops here and `link.dart`, the fakes in `ble_fixtures.dart`
 /// and every test above them were untouched by the bump.
 class UniversalBleOps implements BleOps {
+  /// The plugin's own answer, not ours.
+  ///
+  /// `BleCapabilities.mtuRequiresServiceDiscovery` is iOS, macOS and Linux in
+  /// universal_ble 3.2.0, which is exactly what the three platform transports
+  /// used to declare for themselves - and a copied fact goes stale without a
+  /// compile error or a failing test. The cost of this one going stale was
+  /// measured: it is two service discoveries per connect, which is what #444
+  /// fixed. Reading it is free, unlike `canonicalDeviceId` - it looks at
+  /// `kIsWeb` and `defaultTargetPlatform` and touches no backend.
+  @override
+  bool get mtuNeedsDiscovery =>
+      uble.BleCapabilities.mtuRequiresServiceDiscovery;
+
   @override
   set onConnectionChange(void Function(String, bool, String?)? cb) {
     uble.UniversalBle.onConnectionChange = cb == null

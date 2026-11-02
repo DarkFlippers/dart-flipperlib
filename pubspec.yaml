@@ -53,7 +53,7 @@ dependencies:
   # What 3.0.0 broke and where it is absorbed: the two callback signatures in
   # `transport/ble/ops.dart`, the `QueueType` default in
   # `transport/ble/ble.dart`, and lower-case device ids in
-  # [canonicalBleDeviceId] (`transport/ble/device_id.dart`).
+  # [canonicalBleDeviceId] (`model/device_id.dart`).
   universal_ble: ^3.2.0
   usb_serial: ^0.5.2
 
